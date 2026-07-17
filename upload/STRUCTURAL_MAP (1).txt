@@ -1,0 +1,615 @@
+═══════════════════════════════════════════════════════════════════════════
+  ANZARO AI — STRUCTURAL MAP & FILE SYNC AUDIT
+  PERMANENT KNOWLEDGE REFERENCE (PART 2)
+  Generated: 2026-07-07
+  Source: HuggingFace Space (kopabdo/DELTA_AI_V2)
+  Commit: ae62b2b
+═══════════════════════════════════════════════════════════════════════════
+
+TABLE OF CONTENTS
+───────────────────────────────────────────────────────────────────────────
+  0.  AUDIT METHODOLOGY & SYNC STATUS
+  1.  EXACT FILE COUNT & INVENTORY
+  2.  CATEGORIZED FILE INDEX
+      2.1  [APP CORE]
+      2.2  [API ROUTES] (170 routes — full list)
+      2.3  [UI COMPONENTS — CHAT] (53 files)
+      2.4  [UI COMPONENTS — SHADCN/UI] (49 files)
+      2.5  [UI COMPONENTS — OTHER] (26 files)
+      2.6  [STATE MANAGEMENT] (2 files)
+      2.7  [LIB & UTILITIES] (487 files)
+      2.8  [HOOKS] (2 files)
+      2.9  [DATABASE / PRISMA] (29 models)
+      2.10 [CONFIGURATION FILES]
+      2.11 [MINI-SERVICES] (3 services)
+      2.12 [SCRIPTS & EXAMPLES]
+      2.13 [ANDROID APP] (57 files)
+      2.14 [TOOLS DIRECTORY] (3 third-party tools)
+  3.  RECOVERY LOG — MISSING/BROKEN FEATURES
+  4.  HF vs LOCAL SYNC STATUS
+  5.  CRITICAL DEPENDENCY MAP
+
+═══════════════════════════════════════════════════════════════════════════
+  0. AUDIT METHODOLOGY & SYNC STATUS
+═══════════════════════════════════════════════════════════════════════════
+
+METHODOLOGY:
+  1. Fresh clone of HF Space repo (depth 1, commit ae62b2b)
+  2. File discovery via `find` (excluding .git, node_modules, .next)
+  3. Categorization by directory structure + extension
+  4. Diff comparison: HF repo ↔ local working copy
+  5. Broken import detection (grep for @/components/chat/* references)
+  6. Missing file detection (config files, .env, etc.)
+
+SYNC STATUS:
+  ✅ HF repo ↔ Local working copy: 100% IN SYNC (0 source file differences)
+  ⚠️  Local-only files (not in HF): .env, dev.log, next-env.d.ts (build artifact)
+  ⚠️  Missing from both: .env.example (no env template for new developers)
+
+═══════════════════════════════════════════════════════════════════════════
+  1. EXACT FILE COUNT & INVENTORY
+═══════════════════════════════════════════════════════════════════════════
+
+TOTAL FILES (excluding .git, node_modules, .next): 1,354
+
+BY EXTENSION:
+  .ts          700  (TypeScript source)
+  .md          220  (Documentation + agent-ctx records)
+  .json        166  (Config + package files)
+  .tsx         134  (React components)
+  .txt          35  (Tool results + audit files)
+  .kt           35  (Android Kotlin files)
+  .xml           9  (Android XML resources)
+  .sh            7  (Shell scripts)
+  .sql           6  (Prisma migrations)
+  .yml           5  (Docker/CI configs)
+  .ttf           4  (PDF engine fonts)
+  .lock          4  (Bun lockfiles)
+  .mjs           3  (ESM config files)
+  .kts           3  (Android Gradle Kotlin)
+  .gitignore     3  (Git ignore files)
+  .properties    2  (Android properties)
+  .dockerignore  2  (Docker ignore files)
+  .toml          1  (Prisma migration lock)
+  .svg           1  (SVG asset)
+  .pro           1  (Android ProGuard)
+  .css           1  (globals.css — Tailwind v4)
+  .bak           1  (Prisma schema backup)
+
+SOURCE CODE BREAKDOWN:
+  .tsx files:   134 (React components)
+  .ts files:    700 (TypeScript modules)
+  Total TS/TSX: 834 source files
+
+═══════════════════════════════════════════════════════════════════════════
+  2. CATEGORIZED FILE INDEX
+═══════════════════════════════════════════════════════════════════════════
+
+───────────────────────────────────────────────────────────────────────────
+  2.1 [APP CORE] — 6 files
+───────────────────────────────────────────────────────────────────────────
+  src/app/error.tsx          — Error boundary
+  src/app/globals.css        — Design system (Clean Slate theme)
+  src/app/layout.tsx         — Root layout (ThemeProvider, Toaster, FixTransparentColors)
+  src/app/loading.tsx        — Next.js loading state
+  src/app/not-found.tsx      — 404 page
+  src/app/page.tsx           — Entry point (auth gate + loading screen)
+
+───────────────────────────────────────────────────────────────────────────
+  2.2 [API ROUTES] — 170 routes
+───────────────────────────────────────────────────────────────────────────
+
+  AUTH (11 routes):
+    /api/auth/google              /api/auth/google/callback
+    /api/auth/login               /api/auth/logout
+    /api/auth/me                  /api/auth/register
+    /api/auth/register-verify     /api/auth/reset-password
+    /api/auth/send-otp            /api/auth/verify-otp
+
+  CHAT (12 routes):
+    /api/chat                     /api/chat/arena
+    /api/chat/batch               /api/chat/conversations
+    /api/chat/conversations/[id]  /api/chat/files
+    /api/chat/files/[id]          /api/chat/messages/[id]
+    /api/chat/send                /api/chat/stream
+
+  AI FEATURES (28 routes):
+    /api/ai/agent                 /api/ai/agent-tools
+    /api/ai/asr                   /api/ai/business-tools
+    /api/ai/code-exec             /api/ai/compare-tools
+    /api/ai/compile               /api/ai/custom-models
+    /api/ai/data-analysis         /api/ai/doc-gen
+    /api/ai/document-memory       /api/ai/drive/file/[fileId]
+    /api/ai/drive/search          /api/ai/drive/status
+    /api/ai/extended-tools        /api/ai/hf-verify
+    /api/ai/hf/chat               /api/ai/hf/document
+    /api/ai/hf/health             /api/ai/hf/image
+    /api/ai/hf/models             /api/ai/hf/video
+    /api/ai/image                 /api/ai/image-gen
+    /api/ai/image/download/[id]   /api/ai/image/edit
+    /api/ai/image/search          /api/ai/mcp
+    /api/ai/media-tools           /api/ai/mindmap
+    /api/ai/models                /api/ai/page-reader
+    /api/ai/parallel-agents       /api/ai/podcast
+    /api/ai/quiz                  /api/ai/rag-tools
+    /api/ai/tools                 /api/ai/translate
+    /api/ai/tts                   /api/ai/tts/edge
+    /api/ai/tts/groq              /api/ai/tts/preview
+    /api/ai/tts/status            /api/ai/tts/voices
+    /api/ai/video                 /api/ai/video-gen
+    /api/ai/video/status          /api/ai/vision
+    /api/ai/vision-tools          /api/ai/visual-compile
+    /api/ai/visual-extract        /api/ai/voice-chat
+
+  ADMIN (18 routes):
+    /api/admin/agent              /api/admin/aggregator/init
+    /api/admin/aggregator/pool    /api/admin/aggregator/pool/[id]
+    /api/admin/aggregator/seed    /api/admin/aggregator/status
+    /api/admin/aggregator/trigger /api/admin/aggregator/validate
+    /api/admin/api-keys           /api/admin/broadcast
+    /api/admin/conversations      /api/admin/custom-models
+    /api/admin/drive/files        /api/admin/hf-models
+    /api/admin/real-stats         /api/admin/sessions
+    /api/admin/settings           /api/admin/skills
+    /api/admin/stats              /api/admin/system-prompts
+    /api/admin/tools              /api/admin/user-conversations
+    /api/admin/users              /api/admin/users/[id]
+
+  AGENTS (6 routes):
+    /api/agent                    /api/agent/specialized
+    /api/agents                   /api/agents/[id]
+    /api/agents/[id]/run          /api/agents/generate-prompt
+    /api/agents/recipes           /api/agents/seed
+
+  MCP (9 routes):
+    /api/mcp/dry-run              /api/mcp/execute
+    /api/mcp/job-complete         /api/mcp/jobs
+    /api/mcp/jobs/[id]            /api/mcp/jobs/[id]/steps/[stepName]
+    /api/mcp/jobs/[id]/stream     /api/mcp/test-connection
+
+  MCP SERVERS (2 routes):
+    /api/mcp-servers              /api/mcp-servers/[id]
+
+  VOICE (3 routes):
+    /api/voice/broadcast          /api/voice/chat
+    /api/voice/health
+
+  SPOTIFY (6 routes):
+    /api/spotify/auth             /api/spotify/callback
+    /api/spotify/play             /api/spotify/save-tokens
+    /api/spotify/status           /api/spotify/web-player-token
+
+  TELEGRAM (4 routes):
+    /api/telegram/auto-setup      /api/telegram/start
+    /api/telegram/status          /api/telegram/webhook
+
+  YOUTUBE (2 routes):
+    /api/youtube/analyze          /api/youtube/search
+
+  WHATSAPP (2 routes):
+    /api/whatsapp/status          /api/whatsapp/webhook
+
+  PDF (4 routes):
+    /api/pdf/link                 /api/pdf/list
+    /api/pdf/renderer-status      /api/pdf/serve/[filename]
+
+  RADIO (2 routes):
+    /api/radio/stations           /api/radio/stations/[id]
+
+  FILES (2 routes):
+    /api/files/extract-batch      /api/files/extract-text
+
+  RAG (2 routes):
+    /api/rag/query                /api/rag/status
+
+  SYSTEM (4 routes):
+    /api/system/approvals         /api/system/health
+    /api/system/info              /api/system/sandbox
+
+  CRON (2 routes):
+    /api/cron/cleanup             /api/cron/reminders
+
+  N8N (2 routes):
+    /api/n8n/templates            /api/n8n/templates/[id]
+
+  STANDALONE (17 routes):
+    /api/content-studio           /api/design/reasoning
+    /api/documents/generate       /api/file/read
+    /api/health                   /api/jobs/create
+    /api/recipes                  /api/reminders
+    /api/report/architecture      /api/script-writer
+    /api/search                   /api/setup-db        ← SECURITY RISK
+    /api/status                   /api/tools
+    /api/tts                      /api/trace/events
+    /api/user/achievements        /api/user/daily-challenge
+    /api/user/memory              /api/user/stats
+
+───────────────────────────────────────────────────────────────────────────
+  2.3 [UI COMPONENTS — CHAT] — 53 files
+───────────────────────────────────────────────────────────────────────────
+  AIMediaGenerator.tsx          AdminDashboard.tsx
+  AgentMode.tsx                 BackendTracePanel.tsx
+  ChatApp.tsx                   ChatHeader.tsx
+  ChatInput.tsx                 CodeBlock.tsx
+  CodeSandbox.tsx               ConversationSidebar.tsx
+  DataAnalysisPanel.tsx         DocumentGenDialog.tsx
+  DocumentProgressCard.tsx      DocumentReadyCard.tsx
+  FilesPanel.tsx                GamificationPanel.tsx
+  ImageEditDialog.tsx           ImageGenDialog.tsx
+  ImageSearchDialog.tsx         IslamicPanel.tsx
+  MessageBubble.tsx             MessageList.tsx
+  MindMapViewer.tsx             ModelArena.tsx
+  ModelSelector.tsx             MusicPlayer.tsx
+  PageReaderDialog.tsx          PodcastStudio.tsx
+  ProgressIndicator.tsx         QuizGenerator.tsx
+  RadioPlayer.tsx               SearchBar.tsx
+  SettingsDialog.tsx            ShareDialog.tsx
+  SkillsPanel.tsx               SpecializedAgentsHub.tsx
+  StatusBar.tsx                 ToolsGallery.tsx
+  TranslationDialog.tsx         UserMemoryPanel.tsx
+  UserProfileModal.tsx          VideoGenDialog.tsx
+  VoiceBroadcast.tsx            VoiceChatOverlay.tsx
+  WelcomeScreen.tsx
+
+  ADMIN TABS (9 files):
+    admin/ApiEndpointsTab.tsx    admin/BroadcastsTab.tsx
+    admin/HFModelsTab.tsx        admin/OverviewTab.tsx
+    admin/RadioTab.tsx           admin/SettingsTab.tsx
+    admin/SystemPromptsTab.tsx   admin/UsersTab.tsx
+    admin/types.ts
+
+───────────────────────────────────────────────────────────────────────────
+  2.4 [UI COMPONENTS — SHADCN/UI] — 49 files
+───────────────────────────────────────────────────────────────────────────
+  alert-dialog.tsx              alert.tsx
+  aspect-ratio.tsx              avatar.tsx
+  badge.tsx                     breadcrumb.tsx
+  button.tsx                    calendar.tsx
+  card.tsx                      carousel.tsx
+  chart.tsx                     checkbox.tsx
+  collapsible.tsx               command.tsx
+  context-menu.tsx              dialog.tsx
+  drawer.tsx                    dropdown-menu.tsx
+  form.tsx                      hover-card.tsx
+  input-otp.tsx                 input.tsx
+  ios-theme-toggle.tsx          label.tsx
+  menubar.tsx                   navigation-menu.tsx
+  pagination.tsx                popover.tsx
+  progress.tsx                  radio-group.tsx
+  resizable.tsx                 scroll-area.tsx
+  select.tsx                    separator.tsx
+  sheet.tsx                     sidebar.tsx
+  skeleton.tsx                  slider.tsx
+  sonner.tsx                    switch.tsx
+  table.tsx                     tabs.tsx
+  textarea.tsx                  toast.tsx
+  toaster.tsx                   toggle-group.tsx
+  toggle.tsx                    tooltip.tsx
+
+───────────────────────────────────────────────────────────────────────────
+  2.5 [UI COMPONENTS — OTHER] — 26 files
+───────────────────────────────────────────────────────────────────────────
+  ROOT:
+    ErrorBoundary.tsx            FixTransparentColors.tsx
+    theme-provider.tsx
+
+  ADMIN:
+    admin/AdminAgentChat.tsx     admin/header.tsx
+    admin/input.tsx              admin/message.tsx
+    admin/tool-call-card.tsx
+
+  AGENTS:
+    agents/AgentBuilder.tsx      agents/AgentForm.tsx
+    agents/AgentRunner.tsx       agents/JobsMonitor.tsx
+    agents/McpCatalogHub.tsx
+
+  AI-TOOLS:
+    ai-tools/AIToolsHub.tsx      ai-tools/MCPHub.tsx
+
+  AUTH:
+    auth/AuthPage.tsx
+
+  DELTA (legacy):
+    delta/header.tsx             delta/input.tsx
+    delta/message.tsx            delta/tool-call-card.tsx
+    delta/tool-explorer.tsx
+
+  PDF:
+    pdf/PdfCreatorApp.tsx
+
+  PROVIDERS:
+    providers/direction-provider.tsx
+    providers/theme-provider.tsx
+
+  SKILLS:
+    skills/SkillsHub.tsx
+
+  TOOLS:
+    tools/ToolsHub.tsx
+
+───────────────────────────────────────────────────────────────────────────
+  2.6 [STATE MANAGEMENT] — 2 files
+───────────────────────────────────────────────────────────────────────────
+  src/store/auth-store.ts       — Auth state (321 lines, persisted)
+  src/store/chat-store.ts       — Chat state (1,836 lines, persisted)
+
+───────────────────────────────────────────────────────────────────────────
+  2.7 [LIB & UTILITIES] — 487 files
+───────────────────────────────────────────────────────────────────────────
+
+  ROOT LIB (487 files total, top-level only):
+    achievements.ts              ai-document-generator.ts
+    anthropic.ts                 api-client.ts
+    auth.ts                      batch-processor.ts
+    cerebras.ts                  chart-generator.ts
+    chat-utils.ts                cleanup.ts
+    cloudflare-ai.ts             content-classifier.ts
+    content-strategy-prompt.ts   cross-mode-suggestions.ts
+    db.ts                        design-reasoning.ts
+    design-templates.ts          disabled-models.ts
+    document-models.ts           drive-rag.ts
+    dynamic-design-css.ts        dynamic-themes.ts
+    edge-tts.ts                  email.service.ts
+    format-utils.ts              gemini.ts
+    github-models.ts             google-drive-credentials.ts
+    google-drive.service.ts      google-tts.ts
+    gradio-tts.service.ts        gradio-voice.service.ts
+    groq.ts                      hf-asr.service.ts
+    hf-chat.service.ts           hf-document.service.ts
+    hf-image.service.ts          hf-load-balancer.ts
+    hf-model-resolve.ts          hf-tts.service.ts
+    hf-video.service.ts          html-template-generator.ts
+    huggingface.ts               image-models.ts
+    intent/router.ts             intent/patterns.ts
+    models.ts                    mcp/recipes.ts
+    mcp/mcp-client.ts            mcp/registry.ts
+    openai.ts                    openrouter.ts
+    parallel-agent-engine.ts     pdf-text-extractor.ts
+    pdf-visual-extractor.ts      playwright-renderer.ts
+    pollinations.ts              prompt-engine.ts
+    quiz-service.ts              quiz-intent.ts
+    rate-limit.ts                rendering-pipeline.ts
+    security/url-guard.ts        session-secret.ts
+    skills.ts                    spotify-pkce.ts
+    streaming/sse-parser.ts      system-monitor.ts
+    system-prompt-overrides.ts    trace-logger.ts
+    tts-unified.ts               unique-palette-generator.ts
+    user-memory.service.ts       utils.ts
+    video-models.ts              visual-compile-service.ts
+    zai-client.ts
+
+  SUBDIRECTORIES:
+    lib/admin/        (3 files) — orchestrator, executor, tools
+    lib/agents/       (6 files) — catalog, executor, mcp-client, n8n-templates, orchestrator, recipes
+    lib/ai-tools/     (13 files) — adv-agent-tools, adv-rag-tools, agent-tools, business-tools, catalog, compare-tools, mcp-chat-integration, mcp-tools, media-tools, rag-tools, registry, vision-tools
+    lib/api-aggregator/ (7 files) — init, pool-manager, reporter, scheduler, sources, types, validator
+    lib/chat/         (11 files) — attachment-parser, capabilities-prompt, doc-intent-classifier, drive-cache, html-sanitizer, media-intent, multi-file-extractor, provider-health, smart-doc-v2, system-prompt-builder, time-context
+    lib/content-studio/ (3 files) — engine, prompt-builder, types
+    lib/glm/          (1 file) — orchestrator
+    lib/integrations/ (5 files) — document-generator, telegram-bot, telegram-webhook, whatsapp-bot, youtube-service
+    lib/mcp/          (7 files) — agent-engine, json-helper, memory-store, recipe-engine, registry, specialized-agents, types
+    lib/mcp/tools/    (340 files) — MCP tool implementations (largest directory)
+    lib/pdf-engine/   (6 files) — pdf-engine, utils, 4 font files
+    lib/rag/          (3 files) — lecture-store, rag-engine, text-splitter
+    lib/scriptwriter/ (3 files) — engine, prompt-builder, types
+    lib/security/     (1 file) — url-guard
+    lib/skills/       (2 files) — context-builder, loader
+    lib/streaming/    (1 file) — sse-parser
+
+───────────────────────────────────────────────────────────────────────────
+  2.8 [HOOKS] — 2 files
+───────────────────────────────────────────────────────────────────────────
+  src/hooks/use-mobile.ts       — Mobile viewport detection
+  src/hooks/use-toast.ts        — Toast notifications (legacy)
+
+───────────────────────────────────────────────────────────────────────────
+  2.9 [DATABASE / PRISMA] — 29 models
+───────────────────────────────────────────────────────────────────────────
+  SCHEMA: prisma/schema.prisma (✅ exists)
+  BACKUP: prisma/schema.prisma.bak
+  SEED: prisma/seed.ts
+  MIGRATIONS: 6 migration files + migration_lock.toml
+
+  MODELS (29):
+    Achievement                  AdminSettings
+    ApiAggregationJob            ApiEndpoint
+    ApiValidationLog             ChallengeCompletion
+    Conversation                 CustomAgent
+    CustomModel                  DailyChallenge
+    DocumentMemory               ExternalMcpServer
+    GenerativeAsset              HFDisabledModel
+    JobStep                      McpJob
+    Message                      OtpCode
+    Podcast                      RadioStation
+    Reminder                     Session
+    SpotifyToken                 SystemPromptOverride
+    User                         UserAchievement
+    UserMemory                   UserStats
+    VoiceBroadcast
+
+───────────────────────────────────────────────────────────────────────────
+  2.10 [CONFIGURATION FILES] — 15 files
+───────────────────────────────────────────────────────────────────────────
+  .dockerignore                  .gitignore
+  Caddyfile                      Dockerfile (54 lines, FROM oven/bun:1)
+  components.json                docker-compose.yml
+  eslint.config.mjs              next.config.ts
+  package.json (81 deps, 10 devDeps, 11 scripts)
+  postcss.config.mjs             tailwind.config.ts
+  tsconfig.json                  bun.lock
+
+  SHELL SCRIPTS (7):
+    install.sh                   setup.sh
+    start.sh (103 lines)         startup.sh
+    start-telegram.ts            telegram-poller.ts
+    test-all-apis.mjs
+
+  DOCUMENTATION (6 .md files):
+    README.md                    AI_TOOLS_PLAN.md
+    FULL_KEYS_GUIDE.md           KEY_ANALYSIS.md
+    N8N_INTEGRATION_GUIDE.md     worklog.md + worklog-v6.md
+
+  SERVICE ACCOUNTS:
+    google-service-account.json
+
+───────────────────────────────────────────────────────────────────────────
+  2.11 [MINI-SERVICES] — 3 services
+───────────────────────────────────────────────────────────────────────────
+  mini-services/mcp-engine/      — MCP engine (index.ts + package.json)
+  mini-services/mcp-server/      — Full MCP server (Docker, tests, src/)
+  mini-services/voice-service/   — Voice service (index.ts + package.json)
+
+───────────────────────────────────────────────────────────────────────────
+  2.12 [SCRIPTS & EXAMPLES]
+───────────────────────────────────────────────────────────────────────────
+  scripts/dev-pg.sh              — PostgreSQL dev setup
+  scripts/dev-sqlite.sh          — SQLite dev setup
+  examples/websocket/frontend.tsx — WebSocket frontend example
+  examples/websocket/server.ts    — WebSocket server example
+
+───────────────────────────────────────────────────────────────────────────
+  2.13 [ANDROID APP] — 57 files
+───────────────────────────────────────────────────────────────────────────
+  delta-ai-android/ — Native Android app (Kotlin)
+  Files: .kt (35), .xml (9), .kts (3), .properties (2), .gitignore, .pro
+  Build: Gradle (build.gradle.kts, settings.gradle.kts)
+  Includes: app/, gradle/, gradlew, setup.sh, README.md
+
+───────────────────────────────────────────────────────────────────────────
+  2.14 [TOOLS DIRECTORY] — 3 third-party tools
+───────────────────────────────────────────────────────────────────────────
+  tools/d3-format/               — D3 formatting library
+  tools/marketingskills/         — Marketing skills package
+  tools/pentestgpt/              — Penetration testing tool
+
+═══════════════════════════════════════════════════════════════════════════
+  3. RECOVERY LOG — MISSING/BROKEN FEATURES
+═══════════════════════════════════════════════════════════════════════════
+
+3.1 CONFIRMED MISSING FILES (not in HF or local)
+
+  [MISS-1] .env.example
+    Status: Missing from both HF and local
+    Impact: New developers have no template for required environment variables
+    Fix: Create .env.example with all required vars (DATABASE_URL, SESSION_SECRET, etc.)
+    Priority: P2
+
+  [MISS-2] NotebookPanel / Notepad component
+    Status: Never existed (confirmed via find)
+    Impact: None — feature was never built
+    Fix: Not needed unless user requests it
+    Priority: N/A
+
+3.2 FILES DELETED IN PREVIOUS LOOPS (now confirmed absent)
+
+  [DEL-1] public/preview/ directory
+    Status: Was temporary (screenshots for user preview)
+    Impact: None — was never part of production
+    Fix: No action needed
+    Priority: N/A
+
+  [DEL-2] tool-results/ directory (mostly cleaned)
+    Status: 3 bash result files remain (should be gitignored)
+    Impact: Clutters repo, no functional impact
+    Fix: Add tool-results/ to .gitignore + git rm
+    Priority: P3
+
+3.3 FEATURES WITH BROKEN/STAGNANT BACKENDS (from AUDIT-FE)
+
+  [BRK-1] IslamicPanel — prayer times hardcoded
+    UI: ✅ Exists (src/components/chat/IslamicPanel.tsx)
+    API: ❌ None (static values "04:30", "12:10", etc.)
+    Fix: Build /api/islamic/times using Aladhan API
+    Priority: P2
+
+  [BRK-2] CodeSandbox — Python non-functional
+    UI: ✅ Exists (src/components/chat/CodeSandbox.tsx)
+    API: ⚠️ handlePython() returns hardcoded error
+    Fix: Integrate Pyodide (WASM Python) or remove Python option
+    Priority: P3
+
+  [BRK-3] PodcastStudio — TTS silently fails
+    UI: ✅ Exists (src/components/chat/PodcastStudio.tsx)
+    API: ⚠️ /api/ai/podcast exists but TTS returns "الصوت غير متاح"
+    Fix: Wire to /api/ai/tts/edge (Edge TTS)
+    Priority: P2
+
+  [BRK-4] AIToolsHub — 108 tools are prompt-only
+    UI: ✅ Exists (src/components/ai-tools/AIToolsHub.tsx)
+    API: ⚠️ Each tool sends prompt to GLM-5.2 (no real integration)
+    Fix: Label as "AI-assisted" or build real MCP integrations
+    Priority: P3
+
+  [BRK-5] ToolsGallery — apiEndpoint strings as text
+    UI: ✅ Exists (src/components/chat/ToolsGallery.tsx)
+    API: ❌ Never fetched
+    Fix: Make clickable or remove display
+    Priority: P3
+
+3.4 ORPHAN APIs (41+ routes with no UI connection)
+  See AUDIT_KNOWLEDGE_REFERENCE.txt Section 4.2 for full list.
+  High-value orphans to expose: /api/ai/image-gen, /api/ai/voice-chat,
+    /api/ai/tts/edge, /api/rag/query, /api/reminders, /api/youtube/analyze
+
+═══════════════════════════════════════════════════════════════════════════
+  4. HF vs LOCAL SYNC STATUS
+═══════════════════════════════════════════════════════════════════════════
+
+  SOURCE FILES (.ts, .tsx, .css):
+    ✅ 100% IN SYNC — 0 differences between HF and local
+
+  LOCAL-ONLY FILES (not in HF, intentionally):
+    .env                         — Environment variables (secrets, never commit)
+    dev.log                      — Dev server log (gitignored)
+    next-env.d.ts                — Next.js type declarations (auto-generated)
+    AUDIT_KNOWLEDGE_REFERENCE.txt — This audit document
+    STRUCTURAL_MAP.txt            — This structural map document
+
+  HF-ONLY FILES (not in local, intentionally):
+    (none — all HF files are in local)
+
+  VERDICT: Repository is fully synchronized. No missing source files.
+
+═══════════════════════════════════════════════════════════════════════════
+  5. CRITICAL DEPENDENCY MAP
+═══════════════════════════════════════════════════════════════════════════
+
+5.1 ENTRY POINTS
+  Production: start.sh → bun .next/standalone/server.js
+  Development: bun run dev → next dev -p 3000 --webpack
+  Build: bun run build → next build (produces .next/standalone)
+
+5.2 CRITICAL PATH
+  page.tsx → auth-store.checkAuth() → AuthPage OR ChatApp
+  ChatApp → ChatHeader + MessageList + ChatInput + StatusBar
+  MessageList → MessageBubble (per message)
+  ChatInput → /api/chat/stream (SSE streaming)
+
+5.3 DATABASE
+  Provider: PostgreSQL (Supabase in production)
+  Fallback: SQLite (local dev via prisma/schema.prisma)
+  Client: Prisma (singleton in src/lib/db.ts)
+  Migrations: 6 migration files in prisma/migrations/
+
+5.4 AUTH FLOW
+  Login: /api/auth/login → JWT session token → localStorage (persisted)
+  Verify: /api/auth/me → token rotation → updated localStorage
+  Google: /api/auth/google → OAuth → /api/auth/google/callback
+  Logout: /api/auth/logout → invalidate session → clear localStorage
+
+5.5 STREAMING PIPELINE
+  ChatInput → POST /api/chat/stream
+  → auth check → rate limit → provider selection
+  → ZAI SDK / HuggingFace / Cloudflare / Pollinations
+  → SSE stream → MessageList → MessageBubble (typewriter effect)
+  → Save to DB (conversation + messages)
+
+═══════════════════════════════════════════════════════════════════════════
+  END OF STRUCTURAL MAP
+═══════════════════════════════════════════════════════════════════════════
+
+  This file is the permanent structural reference for Anzaro AI.
+  Companion to: AUDIT_KNOWLEDGE_REFERENCE.txt
+  Last updated: 2026-07-07
+  Next review: After Recovery Log items are resolved
+═══════════════════════════════════════════════════════════════════════════

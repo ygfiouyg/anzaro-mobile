@@ -1,0 +1,300 @@
+================================================================================
+قائمة المفاتيح المطلوبة لمنصة Anzaro AI
+================================================================================
+كل مفتاح + اسم الأداة + بتعمل إيه + اللينك اللي تجيب منه المفتاح
+
+═══════════════════════════════════════════════════════════════════════════════
+أولاً: المفاتيح الأساسية (ضرورية جداً — بدونها المنصة مش هتشتغل)
+═══════════════════════════════════════════════════════════════════════════════
+
+1. ZAI_API_KEY
+   الأداة: كل الـ chat + tool-calling + GLM models
+   بتعمل: بتخلي الـ AI يرد على المستخدمين + يستدعي الأدوات
+   اللينك: https://open.bigmodel.cn → سجل → API Keys → Create
+   مجاني: ✅ 100% مجاني (GLM-4-Flash مجاني للأبد)
+   البديل: ZHIPUAI_API_KEY (نفس الحاجة من نفس الموقع)
+
+2. DATABASE_URL
+   الأداة: قاعدة البيانات كلها (users, sessions, tools, skills, apps)
+   بتعمل: بتخزين كل بيانات المنصة
+   اللينك: https://supabase.com → سجل → New Project → خد connection string
+   مجاني: ✅ (Supabase مجاني لحد 500MB)
+   ملاحظة: إنت عندك DB مربوط — متغيرهش
+
+3. NEXTAUTH_SECRET
+   الأداة: NextAuth (Google OAuth + session security)
+   بتعمل: بتشفير الـ JWT cookies — بدونها الـ sessions بتمسح كل restart
+   اللينك: أي string عشوائي 32+ حرف
+   مجاني: ✅ (مفيش موقع — اكتب أي حاجة عشوائية)
+
+4. NEXTAUTH_URL
+   الأداة: NextAuth redirect URLs
+   بتعمل: بتحدد الـ domain بتاع المنصة
+   القيمة: https://kopabdo-delta-ai-v2.hf.space
+   مجاني: ✅
+
+5. GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
+   الأداة: Google OAuth (Drive, Calendar, Tasks, Contacts, Docs, Sheets)
+   بتعمل: بتخلي المستخدمين يربطوا Google accounts
+   اللينك: https://console.cloud.google.com → APIs & Services → Credentials → Create OAuth client
+   مجاني: ✅
+   ملاحظة: لازم تضيف callback URL: https://kopabdo-delta-ai-v2.hf.space/api/auth/callback/google
+
+═══════════════════════════════════════════════════════════════════════════════
+ثانياً: مفاتيح الـ AI Models (للـ chat — مصادر متعددة مش ZAI بس)
+═══════════════════════════════════════════════════════════════════════════════
+
+6. HUGGINGFACE_API_TOKEN
+   الأداة: HF Inference API (موديلات HuggingFace — Llama, Qwen, Mistral, Nemotron)
+   بتعمل: بتخليك تستخدم 122+ موديل مجاني من HF
+   اللينك: https://huggingface.co/settings/tokens → New token (Read)
+   مجاني: ✅ 100% مجاني
+
+7. GITHUB_MODELS_TOKEN (أو GITHUB_TOKEN)
+   الأداة: GitHub Models (GPT-4o, Llama 405B, Mistral)
+   بتعمل: بتخليك تستخدم موديلات GitHub المجانية
+   اللينك: https://github.com/settings/tokens → Generate new token (classic)
+   مجاني: ✅ (GitHub Models مجاني لحد limit معين)
+
+8. GEMINI_API_KEY (أو GOOGLE_AI_KEY)
+   الأداة: Google Gemini (2.0 Flash, 2.5 Pro)
+   بتعمل: بتخليك تستخدم Gemini models
+   اللينك: https://aistudio.google.com/apikey
+   مجاني: ✅ (فيه tier مجاني)
+
+9. OPENROUTER_API_KEY
+   الأداة: OpenRouter (وصول لـ 100+ موديل)
+   بتعمل: بتخليك تستخدم موديلات متعددة من مصدر واحد
+   اللينك: https://openrouter.ai/keys → Create Key
+   مجاني: ⚠️ فيه موديلات مجانية + مدفوعة
+
+10. GROQ_API_KEY
+    الأداة: Groq (Llama 70B سريع جداً)
+    بتعمل: بتخليك تستخدم Groq للسرعة العالية
+    اللينك: https://console.groq.com/keys → Create API Key
+    مجاني: ✅ (tier مجاني)
+
+11. CEREBRAS_API_KEY
+    الأداة: Cerebras (أسرع inference)
+    بتعمل: بتخليك تستخدم Cerebras للسرعة
+    اللينك: https://cloud.cerebras.ai → API Keys
+    مجاني: ⚠️ (trial مجاني)
+
+12. OPENAI_API_KEY
+    الأداة: OpenAI (GPT-4o, GPT-4o Mini)
+    بتعمل: بتخليك تستخدم OpenAI models
+    اللينك: https://platform.openai.com/api-keys
+    مجاني: ❌ مدفوع (بس GPT-4o-mini رخيص جداً)
+
+13. ANTHROPIC_API_KEY
+    الأداة: Claude (Sonnet, Opus, Haiku)
+    بتعمل: بتخليك تستخدم Claude models
+    اللينك: https://console.anthropic.com/settings/keys
+    مجاني: ❌ مدفوع (بس فيه $5 credit مجاني للتسجيل)
+
+═══════════════════════════════════════════════════════════════════════════════
+ثالثاً: مفاتيح أدوات الذكاء الاصطناعي (AI Tools)
+═══════════════════════════════════════════════════════════════════════════════
+
+14. ELEVENLABS_API_KEY
+    الأداة: tts_generate (تحويل النص لصوت عالي الجودة)
+    بتعمل: بتولّد صوت طبيعي بالعربي
+    اللينك: https://elevenlabs.io → Profile → API Keys
+    مجاني: ✅ (10,000 حرف/شهر مجاناً)
+
+15. YOUTUBE_API_KEY
+    الأداة: youtube_analyze, youtube_search, youtube_check_new
+    بتعمل: بتحلل فيديوهات يوتيوب + بحث + فحص قنوات جديدة
+    اللينك: https://console.cloud.google.com → Enable YouTube Data API v3 → Create API Key
+    مجاني: ✅ (10,000 وحدة/يوم)
+
+16. GNEWS_API_KEY
+    الأداة: news_headlines (جلب الأخبار)
+    بتعمل: بتجيب أحدث الأخبار العالمية
+    اللينك: https://gnews.io/register
+    مجاني: ✅ (100 طلب/يوم)
+
+17. NASA_API_KEY
+    الأداة: معلومات الفضاء والصور الفضائية
+    بتعمل: بتجيب صور NASA + معلومات فلكية
+    اللينك: https://api.nasa.gov → Generate API Key
+    مجاني: ✅ 100%
+
+18. TMDB_API_KEY
+    الأداة: movie_info (معلومات الأفلام)
+    بتعمل: بتجيب معلومات + تقييمات الأفلام والمسلسلات
+    اللينك: https://www.themoviedb.org/settings/api → Request API Key
+    مجاني: ✅ 100%
+
+19. OMDB_API_KEY
+    الأداة: معلومات إضافية عن الأفلام
+    بتعمل: بتجيب معلومات أفلام من OMDB
+    اللينك: https://www.omdbapi.com/apikey.aspx
+    مجاني: ✅ (1,000 طلب/يوم)
+
+20. FIXER_API_KEY
+    الأداة: exchange_history (أسعار صرف العملات تاريخياً)
+    بتعمل: بتجيب أسعار صرف تاريخية
+    اللينك: https://fixer.io → Sign up → Get API Key
+    مجاني: ✅ (100 طلب/شهر)
+
+21. OPENEXCHANGERATES_APP_ID
+    الأداة: currency_convert (تحويل العملات)
+    بتعمل: بتحوّل بين 160+ عملة
+    اللينك: https://openexchangerates.org → Sign up → App IDs
+    مجاني: ✅ (1,000 طلب/شهر)
+
+22. CARBON_INTERFACE_API_KEY
+    الأداة: معلومات السيارات والانبعاثات
+    بتعمل: بتجيب بيانات السيارات
+    اللينك: https://www.carboninterface.com → API Keys
+    مجاني: ✅ (tier مجاني)
+
+23. CAT_API_KEY
+    الأداة: صور وأ info القطط
+    بتعمل: بتجيب صور ومعلومات قطط
+    اللينك: https://thecatapi.com → Sign up
+    مجاني: ✅ 100%
+
+═══════════════════════════════════════════════════════════════════════════════
+رابعاً: مفاتيح خدمات الإيميل والرسائل
+═══════════════════════════════════════════════════════════════════════════════
+
+24. BREVO_API_KEY
+    الأداة: إرسال إيميلات (تسجيل + OTP + إشعارات)
+    بتعمل: بتبعت إيميلات للمستخدمين
+    اللينك: https://www.brevo.com → SMTP & API → API Keys
+    مجاني: ✅ (300 إيميل/يوم)
+    محتاج كمان: BREVO_SENDER_EMAIL + BREVO_SENDER_NAME
+
+25. RESEND_API_KEY
+    الأداة: بديل لـ Brevo (إرسال إيميلات)
+    بتعمل: بتبعت إيميلات أسرع
+    اللينك: https://resend.com/api-keys → Create API Key
+    مجاني: ✅ (3,000 إيميل/شهر)
+    محتاج كمان: RESEND_FROM_EMAIL
+
+26. TELEGRAM_BOT_TOKEN
+    الأداة: telegram_send + بوت التليجرام
+    بتعمل: بتبعت رسائل على تليجرام
+    اللينك: https://t.me/BotFather → /newbot → خد الـ token
+    مجاني: ✅ 100%
+
+27. SLACK_WEBHOOK_URL
+    الأداة: slack_send (إرسال رسائل Slack)
+    بتعمل: بتبعت رسائل على قنوات Slack
+    اللينك: https://api.slack.com/messaging/webhooks → Create webhook
+    مجاني: ✅ 100%
+
+28. WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID + WHATSAPP_APP_SECRET
+    الأداة: whatsapp_send (إرسال رسائل واتساب)
+    بتعمل: بتبعت رسائل واتساب للأرقام
+    اللينك: https://developers.facebook.com/apps → WhatsApp Business API
+    مجاني: ⚠️ (1,000 محادثة/شهر مجاناً)
+
+═══════════════════════════════════════════════════════════════════════════════
+خامساً: مفاتيح GitHub (لأدوات GitHub + GitHub Skill Hub)
+═══════════════════════════════════════════════════════════════════════════════
+
+29. GITHUB_PAT (أو GITHUB_TOKEN)
+    الأداة: github_search, github_user, github_repo, github_trending, إلخ
+    بتعمل: بتخليك تبحث في GitHub + تعمل issues + تتابع repos
+    اللينك: https://github.com/settings/tokens → Generate new token (classic) → حدد repo + read:user
+    مجاني: ✅ 100%
+
+═══════════════════════════════════════════════════════════════════════════════
+سادساً: مفاتيح Cloudflare (لـ Cloudflare Workers AI)
+═══════════════════════════════════════════════════════════════════════════════
+
+30. CF_API_TOKEN + CF_ACCOUNT_ID
+    الأداة: Cloudflare Workers AI (GLM-5.2 مجاني + Llama 70B + DeepSeek)
+    بتعمل: بتخليك تستخدم موديلات Cloudflare المجانية
+    اللينك: https://dash.cloudflare.com → My Profile → API Tokens → Create Token
+    مجاني: ✅ (10,000 neurons/يوم مجاناً)
+
+═══════════════════════════════════════════════════════════════════════════════
+سابعاً: مفاتيح إضافية (اختيارية — لتحسين التجربة)
+═══════════════════════════════════════════════════════════════════════════════
+
+31. DEEPINFRA_API_KEY
+    الأداة: موديلات DeepInfra (بديل لـ OpenAI)
+    اللينك: https://deepinfra.com → API Keys
+    مجاني: ✅ (tier مجاني)
+
+32. TOGETHER_API_KEY
+    الأداة: Together AI (موديلات مفتوحة المصدر)
+    اللينك: https://api.together.xyz/settings/api-keys
+    مجاني: ⚠️ ($5 credit مجاني)
+
+33. PINECONE_API_KEY + PINECONE_INDEX_URL
+    الأداة: RAG + vector search (بحث ذكي في المستندات)
+    اللينك: https://www.pinecone.io → Start free
+    مجاني: ✅ (tier مجاني)
+
+34. SUPABASE_URL + SUPABASE_SECRET_KEY + SUPABASE_PUBLISHABLE_KEY
+    الأداة: supabase_ops (عمليات قاعدة البيانات)
+    اللينك: https://supabase.com → Project Settings → API
+    مجاني: ✅ (500MB مجاني)
+
+35. AGIFY_API_KEY + GENDERIZE_API_KEY + NATIONALIZE_API_KEY
+    الأداة: توقع العمر + الجنس + الجنسية من الاسم
+    اللينك: https://agify.io, https://genderize.io, https://nationalize.io
+    مجاني: ✅ (1,000 طلب/يوم)
+
+═══════════════════════════════════════════════════════════════════════════════
+الأدوات اللي مش محتاجة API keys (شغالة مجاناً بدون أي مفتاح)
+═══════════════════════════════════════════════════════════════════════════════
+
+هذه الأدوات شغالة بدون أي مفتاح:
+- wikipedia_search (ويكيبيديا)
+- currency_convert (تحويل العملات — بديل)
+- crypto_price (أسعار الكريبتو)
+- hacker_news (أخبار الهاكر)
+- reddit_digest (ملخصات ريديت)
+- book_search (بحث كتب)
+- time_now (الوقت)
+- country_info (معلومات الدول)
+- uuid_generator (توليد UUIDs)
+- password_generator (توليد كلمات مرور)
+- hash_generator (تشفير)
+- json_formatter (تنسيق JSON)
+- base64_convert (تحويل Base64)
+- url_parser (تحليل روابط)
+- cron_parser (تحليل cron)
+- ssl_cert (فحص SSL)
+- dns_lookup (بحث DNS)
+- ping_test (اختبار سرعة)
+- ip_lookup (معلومات IP)
+- markdown_render (تحويل Markdown)
+- git_commit (توليد commit messages)
+- و الكثير (267+ أداة شغالة بدون keys)
+
+═══════════════════════════════════════════════════════════════════════════════
+ملخص الأولويات
+═══════════════════════════════════════════════════════════════════════════════
+
+🔴 ضروري جداً (بدونها المنصة مش هتشتغل):
+1. ZAI_API_KEY → https://open.bigmodel.cn
+2. DATABASE_URL → (إنت عندك — متغيرهش)
+3. NEXTAUTH_SECRET → (أي string عشوائي)
+4. NEXTAUTH_URL → https://kopabdo-delta-ai-v2.hf.space
+5. GOOGLE_CLIENT_ID + SECRET → https://console.cloud.google.com
+
+🟡 مهم جداً (بدونها الـ chat محدود):
+6. HUGGINGFACE_API_TOKEN → https://huggingface.co/settings/tokens
+7. GITHUB_MODELS_TOKEN → https://github.com/settings/tokens
+8. GEMINI_API_KEY → https://aistudio.google.com/apikey
+9. GROQ_API_KEY → https://console.groq.com/keys
+10. OPENROUTER_API_KEY → https://openrouter.ai/keys
+
+🟢 مفيد (لتحسين التجربة):
+11. ELEVENLABS_API_KEY → https://elevenlabs.io
+12. YOUTUBE_API_KEY → https://console.cloud.google.com
+13. GITHUB_PAT → https://github.com/settings/tokens
+14. CF_API_TOKEN → https://dash.cloudflare.com
+15. BREVO_API_KEY → https://www.brevo.com
+16. TELEGRAM_BOT_TOKEN → https://t.me/BotFather
+
+═══════════════════════════════════════════════════════════════════════════════
+نهاية القائمة
+═══════════════════════════════════════════════════════════════════════════════

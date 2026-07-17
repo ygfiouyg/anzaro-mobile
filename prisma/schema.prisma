@@ -1,0 +1,272 @@
+// Anzaro AI — Local-First AI Home OS
+// Schema supports: Auth (Google+Guest), Personality Profiling, Media Control,
+// Home Assistant devices, Mood Scenes, Quick Actions, MCP Tools, Routines, Chat
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── AUTH ─────────────────────────
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String?
+  avatarUrl     String?
+  googleId      String?    @unique
+  isGuest       Boolean    @default(false)
+  role          String     @default("user") // user | admin
+  dialect       String     @default("egyptian") // egyptian | khaleeji | levantine | msa | english
+  themePreset   String     @default("aurora") // aurora | leadership | creative | calm
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  profile       PersonalityProfile?
+  conversations Conversation[]
+  mediaSessions MediaSession[]
+  quickActions  QuickAction[]
+  routines      Routine[]
+  nudges        ProactiveNudge[]
+  messages      Message[]
+
+  @@index([googleId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────── PERSONALITY PROFILING ───────────────────
+
+model PersonalityProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  // The canonical user_personality.md content
+  markdown        String
+  // Structured fields extracted from onboarding
+  name            String
+  age             Int?
+  occupation      String?
+  personaType     String   @default("balanced") // leader | analytical | creative | emotional | balanced
+  dialect         String   @default("egyptian")
+  // Adaptive traits 0-100
+  leadership      Int      @default(50)
+  stubbornness    Int      @default(50)
+  analytical      Int      @default(50)
+  emotional       Int      @default(50)
+  sociability     Int      @default(50)
+  discipline      Int      @default(50)
+  humor           Int      @default(50)
+  // Free-form drivers / preferences / triggers
+  driversJson     String   @default("[]") // JSON string array
+  preferencesJson String   @default("[]")
+  triggersJson    String   @default("[]")
+  // Evolution tracking (Phase 7.1)
+  version         Int      @default(1)
+  interactionCount Int     @default(0)
+  lastEvolvedAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ──────────────────────── HOME ASSISTANT ────────────────────────
+
+model Device {
+  id            String   @id @default(cuid())
+  // HA-style entity id e.g. media_player.living_room_tv
+  entityId      String   @unique
+  friendlyName  String
+  domain        String   // light | switch | media_player | climate | cover | fan | sensor
+  room          String   @default("Living Room")
+  state         String   @default("off") // on | off | playing | idle | ...
+  // attributes JSON (brightness, color_temp, volume, etc.)
+  attributesJson String  @default("{}")
+  // Semantic aliases the user defines ("شاشة", "tv", "التلفزيون")
+  aliasesJson   String   @default("[]")
+  isControllable Boolean @default(true)
+  icon          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([domain])
+  @@index([room])
+}
+
+// ──────────────────────── MEDIA SESSIONS ────────────────────────
+
+model MediaSession {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   @default("radio") // radio | music | podcast | video
+  title       String
+  source      String   // station name / provider
+  streamUrl   String?
+  stationId   String?
+  status      String   @default("stopped") // playing | paused | stopped
+  positionSec Int      @default(0)
+  durationSec Int?
+  volume      Int      @default(70)
+  startedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RadioStation {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String
+  category    String   // quran | nasheed | music | news | talk
+  city        String?
+  country     String?
+  streamUrl   String
+  logoUrl     String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([category])
+}
+
+// ─────────────────── MOOD SCENES (Phase 7.5) ───────────────────
+
+model MoodScene {
+  id            String   @id @default(cuid())
+  name          String
+  nameAr        String
+  description   String
+  triggerPhrase String   // "I need to focus" -> handled via LLM intent
+  icon          String   @default("Sparkles")
+  color         String   @default("violet")
+  // compound actions JSON: [{entityId, action, params}]
+  actionsJson   String   @default("[]")
+  createdAt     DateTime @default(now())
+}
+
+// ─────────────── QUICK ACTIONS (Phase 7.6 / UI sync) ───────────────
+
+model QuickAction {
+  id         String   @id @default(cuid())
+  userId     String?
+  label      String
+  labelAr    String?
+  icon       String   @default("Zap")
+  command    String   // natural language command
+  actionType String   @default("natural") // natural | device | scene | media
+  targetId   String?  // deviceId / sceneId / stationId
+  useCount   Int      @default(0)
+  isPinned   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────── MCP TOOLS (Phase 1) ───────────────────
+
+model McpTool {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String
+  category      String   // search | media | home | data | utility
+  endpoint      String?  // url or internal route
+  inputSchemaJson String @default("{}")
+  outputType    String   @default("text")
+  isEnabled     Boolean  @default(true)
+  isLocal       Boolean  @default(true) // local-first execution
+  latencyMs     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([category])
+}
+
+// ─────────────── ROUTINES (Phase 6.3 automation) ───────────────
+
+model Routine {
+  id            String   @id @default(cuid())
+  userId        String?
+  name          String
+  nameAr        String
+  description   String
+  triggerJson   String   @default("{}") // {type: schedule|pattern, ...}
+  actionsJson   String   @default("[]")
+  learnedFrom   String?  // "manual_pattern" | "ai_suggested"
+  confidence    Int      @default(50) // 0-100
+  isEnabled     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────── PROACTIVE NUDGES (Phase 7.2) ───────────────
+
+model ProactiveNudge {
+  id           String   @id @default(cuid())
+  userId       String
+  message      String
+  messageAr    String?
+  triggerType  String   // deadline | routine_broken | streak | suggestion
+  severity     String   @default("info") // info | gentle | urgent
+  relatedEntity String?
+  scheduledFor DateTime?
+  status       String   @default("pending") // pending | shown | dismissed | actioned
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────── CHAT ───────────────────────
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String    @default("New Conversation")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([userId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  userId         String?
+  role           String   // user | assistant | system | tool
+  content        String
+  // tool calls / tool results JSON
+  toolCallsJson  String   @default("[]")
+  intent         String?  // chat | media_play | media_stop | device_control | scene | mcp
+  emotion        String?
+  createdAt      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([userId])
+}
