@@ -814,3 +814,76 @@ User authenticates → page.tsx checks /api/anzaro/personality/profile
 ---
 
 *Last updated: 2025-01-30 (Round 17) · Phase 4.1 Dashboard + HASS Control Panel + Matrix Adaptation deployed*
+
+---
+
+## Round 18 — Phase 5.1: Native Mobile Architecture (Expo/React Native) V.14 (2025-01-30)
+
+### What Was Done
+
+1. **Configuration** (`package.json` + `app.json` + `tsconfig.json` + `config.ts`):
+   - Expo 51 with expo-router, lucide-react-native, async-storage, expo-secure-store
+   - expo-haptics for tactile feedback, expo-linear-gradient for themes
+   - iOS + Android config with microphone/speech permissions
+   - Config reads `ANZARO_API_URL` + `HASS_URL` + `HASS_TOKEN` from expo-constants
+   - `EMPTY_MATRIX` fallback object prevents blank screens
+   - `COLORS` theme constants for dark UI
+
+2. **Secure Identity Core** (`src/mobile/context/IdentityContext.tsx`):
+   - `IdentityProvider` manages identityMatrix via AsyncStorage
+   - On mount: loads matrix + token → syncs with Cloud Brain API
+   - If matrix null → `needsOnboarding=true` → routes to OnboardingBridgeScreen
+   - `setMatrix()` / `setToken()` / `clearIdentity()` / `fetchMatrixFromServer()`
+   - V.14: All storage ops use `?.` + `??` + try/catch
+
+3. **Dashboard Screen** (`src/mobile/screens/DashboardScreen.tsx`):
+   - Cloud Brain connection indicator (Cloud/CloudOff icons + status text)
+   - Identity Matrix overview card (archetype + version + trait stats)
+   - **HASS Mobile Sync Panel**:
+     - Domain-grouped device grid (light/switch/climate/sensor)
+     - Toggle switches with optimistic updates + revert on error
+     - Sensor read-only cards with values + units
+     - Loading state + pull-to-refresh (RefreshControl)
+     - Mock mode fallback when HASS not configured
+   - Quick Actions: AI Chat + Settings buttons
+   - V.14: `safeMatrix` fallback, `Array.isArray()` guards, optional chaining
+
+4. **HASS Service** (`src/services/hass.ts`):
+   - `fetchHassDevices()` — fetches from HASS API or returns 8 mock devices
+   - `toggleHassDevice()` — turn_on/turn_off/toggle with mock fallback
+   - `AbortSignal.timeout(5000)` on all calls
+
+5. **Onboarding Bridge Screen** (`src/mobile/screens/OnboardingBridgeScreen.tsx`):
+   - Shown when identityMatrix is null
+   - Login form → authenticates with Cloud Brain API → syncs matrix
+   - Guest mode option
+   - V.14: All network calls in try/catch with timeout
+
+6. **Root App** (`src/App.tsx`):
+   - Identity gate: `isLoading` → splash | `needsOnboarding` → Bridge | else → TabNavigator
+   - 4 tabs: Dashboard, Chat (Anzaro), HomeAssistant, Settings
+   - Haptic feedback on tab press (`Haptics.impactAsync`)
+   - V.14: All navigation state guarded with optional chaining
+
+### Files Created
+- `mobile-app/package.json` — Expo dependencies
+- `mobile-app/app.json` — Expo config (iOS/Android permissions)
+- `mobile-app/tsconfig.json` — TypeScript config
+- `mobile-app/src/config.ts` — API URLs + HASS config + IdentityMatrix types + COLORS
+- `mobile-app/src/App.tsx` — Root app with identity gate + 4-tab navigator
+- `mobile-app/src/mobile/context/IdentityContext.tsx` — Secure identity provider
+- `mobile-app/src/mobile/screens/DashboardScreen.tsx` — Main dashboard + HASS panel
+- `mobile-app/src/mobile/screens/OnboardingBridgeScreen.tsx` — Login/onboarding gate
+- `mobile-app/src/services/hass.ts` — HASS API client with mock fallback
+
+### V.14 Guardrails
+- All AsyncStorage: `?.` optional chaining ✅
+- All network calls: try/catch + AbortSignal.timeout ✅
+- All state: null-coalescing (`??`) with fallback objects ✅
+- Navigation: `?.` on all `navigation.navigate()` calls ✅
+- `Array.isArray()` on device lists ✅
+- Lint: 0 errors ✅
+
+---
+
+*Last updated: 2025-01-30 (Round 18) · Phase 5.1 Native Mobile Architecture deployed*
