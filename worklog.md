@@ -887,3 +887,55 @@ User authenticates → page.tsx checks /api/anzaro/personality/profile
 ---
 
 *Last updated: 2025-01-30 (Round 18) · Phase 5.1 Native Mobile Architecture deployed*
+
+---
+
+## Round 19 — Phase 5.2: Sentient Chat Screen + HASS Action Triggers (V.14) (2025-01-30)
+
+### What Was Done
+
+1. **Secure Chat Service** (`mobile-app/src/services/chatService.ts`):
+   - `streamChat()` — SSE streaming via fetch + ReadableStream reader
+   - `fetchConversationHistory()` — loads chat history with 7s timeout
+   - `parseActions()` — extracts `[ACTION: entity_id:service]` payloads from AI responses
+   - `stripActionMarkers()` — cleans action markers from display text
+   - `getContextModeLabel()` — maps identityMatrix → emotional alignment:
+     - Aggressive friction → "Strategic Anchor" (amber)
+     - Moderate friction → "Critical Mentor" (blue)
+     - Analytical → "Data Partner" (cyan)
+     - Creative → "Creative Muse" (pink)
+     - Philosophical → "Grounding Guide" (emerald)
+     - Default → "Brotherly Companion" (violet)
+   - V.14: All calls guarded with `try/catch` + `?.` + `??` + `AbortSignal.timeout()`
+
+2. **Sentient Chat Screen** (`mobile-app/src/mobile/screens/ChatScreen.tsx`):
+   - **Fluid FlatList timeline** with distinct user/AI message bubbles
+   - **Context Bar** at top: animated orb + mode label (Arabic + English) + archetype badge
+   - **Animated Smart Ball orb**: pulsing scale animation when processing
+   - **Inline HASS Action Cards**:
+     - Parses `[ACTION: light.living_room:toggle]` from AI responses
+     - Renders native action card inside the message bubble
+     - "تأكيد الأمر" button → executes `toggleHassDevice()` 
+     - Optimistic update (CheckCircle2) + revert on error
+   - **expo-haptics feedback**: Light on send, Success on receive, Medium on action execute
+   - Typing dots animation during streaming
+   - Empty state with Sparkles icon
+   - Error state with red bubble styling
+   - V.14: `safeMatrix` fallback, `Array.isArray()` guards, optional chaining on all refs
+
+3. **Updated App.tsx**: Replaced AnzaroChatScreen with new sentient ChatScreen
+
+### Files Created
+- `mobile-app/src/services/chatService.ts` — Chat API wrapper + action parser + context mode
+- `mobile-app/src/mobile/screens/ChatScreen.tsx` — Sentient chat UI with HASS triggers
+
+### V.14 Guardrails
+- All fetch: `AbortSignal.timeout()` (7s for history, 120s for streaming) ✅
+- All state: `?.` + `??` with fallback objects ✅
+- try/catch on all network operations ✅
+- `Array.isArray()` on message lists ✅
+- Lint: 0 errors ✅
+
+---
+
+*Last updated: 2025-01-30 (Round 19) · Phase 5.2 Sentient Chat Screen + HASS Action Triggers deployed*
