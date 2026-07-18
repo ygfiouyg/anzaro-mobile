@@ -676,3 +676,71 @@ if (messages.length > 0) {
 ---
 
 *Last updated: 2025-01-30 (Round 15) · V.101 Hero's Journey + Identity Matrix + Smart Ball Sensory deployed*
+
+---
+
+## Round 16 — Emergency Repair: OAuth Callback Loop + OnboardingQuiz Integration (2025-01-30)
+
+### PROBLEM 1 FIX: Google OAuth Callback Loop
+**Root Cause:** The OAuth callback redirected to `/?google_login=TOKEN` but `page.tsx` never read the URL param — `checkAuth()` read from the empty zustand store → `isAuthenticated = false` → redirect back to login page.
+
+**Fix (3 changes):**
+1. **`src/store/auth-store.ts`** — Added `setGoogleSession(token, name)` method:
+   - Sets the token immediately in the store
+   - Fetches `/api/auth/me` to get the full user profile
+   - Updates `isAuthenticated = true` + user data
+   - Wrapped in try/catch with proper error handling
+
+2. **`src/app/page.tsx`** — Updated `init()` to detect `?google_login=` URL param:
+   - If `google_login` param exists → calls `setGoogleSession(token, name)`
+   - Cleans the URL via `history.replaceState` (no reload)
+   - Falls through to normal auth check if no param
+
+3. **`src/app/api/auth/google/callback/route.ts`** — Added httpOnly cookie:
+   - Sets `anzaro_session` cookie alongside the URL redirect
+   - Ensures session persists across reloads even if store fails
+   - `httpOnly: true, secure: production, sameSite: 'lax', maxAge: 30 days`
+
+### PROBLEM 2 FIX: OnboardingQuiz Direct Injection
+**Implementation:**
+- Added `needsOnboarding` state to `page.tsx`
+- After authentication, checks `/api/anzaro/personality/profile`
+- If `profile` is `null` (no Identity Matrix): blocks dashboard with `<OnboardingFlow />`
+- Applies to BOTH new sign-ups AND old users with empty matrix
+- `onComplete` callback: `setNeedsOnboarding(false)` → seamless transition (no reload)
+
+**Flow:**
+```
+User authenticates → page.tsx checks /api/anzaro/personality/profile
+  → profile exists? → Show ChatApp (dashboard)
+  → profile null?   → Show OnboardingFlow (20-question wizard)
+                       → onComplete → POST /api/anzaro/identity
+                       → setNeedsOnboarding(false)
+                       → Show ChatApp (no reload)
+```
+
+### V.14 Guardrails
+- All OAuth DB transactions wrapped in try/catch with error logging
+- Strict guard: `if (isAuthenticated && needsOnboarding)` before dashboard
+- `Array.isArray()` guards maintained
+- Lint clean: 0 errors
+
+### Verification Results (Live HF Space)
+```
+1. Space status → RUNNING ✅
+2. Home page → HTTP 200 ✅
+3. Login → token returned ✅
+4. Profile check → NULL (will trigger OnboardingQuiz) ✅
+5. Identity API → 20 questions available ✅
+6. Smart Ball → progressive SSE streaming works ✅
+7. Lint → 0 errors ✅
+```
+
+### Files Modified
+- `src/store/auth-store.ts` — added `setGoogleSession` method
+- `src/app/page.tsx` — OAuth redirect handling + onboarding blocker
+- `src/app/api/auth/google/callback/route.ts` — httpOnly session cookie
+
+---
+
+*Last updated: 2025-01-30 (Round 16) · OAuth callback loop fixed + OnboardingQuiz integrated*
