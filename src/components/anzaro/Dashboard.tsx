@@ -11,13 +11,15 @@ import { ScenePanel } from './ScenePanel'
 import { McpToolsPanel } from './McpToolsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { QuickActions } from './QuickActions'
-import { toast } from 'sonner'
+import { ConversationSidebar } from './ConversationSidebar'
+import { RoutinesPanel } from './RoutinesPanel'
+import { WeatherPrayerWidget } from './WeatherPrayerWidget'
 import {
   Cpu, Clapperboard, Wrench, Settings as SettingsIcon, LayoutGrid,
-  Radio, Menu, X, Sparkles, Bell,
+  Radio, Menu, X, Sparkles, Bell, MessageSquare, Calendar,
 } from 'lucide-react'
 
-type RightTab = 'devices' | 'scenes' | 'tools' | 'settings'
+type RightTab = 'conversations' | 'devices' | 'scenes' | 'routines' | 'tools' | 'settings'
 
 export function Dashboard() {
   const { user, profile, rightPanel, setRightPanel, setBall, ball } = useAppStore()
@@ -39,20 +41,21 @@ export function Dashboard() {
   }, [])
 
   function fireCommand(cmd: string) {
-    // Dispatch to chat by setting input via a custom event the ChatPanel listens to
     window.dispatchEvent(new CustomEvent('anzaro-quick-send', { detail: cmd }))
   }
 
   const TABS: { id: RightTab; label: string; icon: any }[] = [
+    { id: 'conversations', label: 'المحادثات', icon: MessageSquare },
     { id: 'devices', label: 'الأجهزة', icon: LayoutGrid },
     { id: 'scenes', label: 'المشاهد', icon: Clapperboard },
+    { id: 'routines', label: 'الروتينات', icon: Calendar },
     { id: 'tools', label: 'الأدوات', icon: Wrench },
     { id: 'settings', label: 'الإعدادات', icon: SettingsIcon },
   ]
 
   return (
     <div className="min-h-screen flex flex-col bg-aurora bg-grid relative overflow-hidden">
-      {/* Ambient */}
+      {/* Ambient blobs */}
       <div className="pointer-events-none absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[120px]" />
       <div className="pointer-events-none absolute -bottom-40 -left-40 w-[500px] h-[500px] rounded-full bg-primary/10 blur-[120px]" />
 
@@ -77,10 +80,16 @@ export function Dashboard() {
             )}
           </div>
 
+          {/* Weather + Prayer widget (desktop) */}
+          <div className="hidden lg:block w-[320px]">
+            <WeatherPrayerWidget />
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => setNudge(null)}
-              className="relative w-8 h-8 rounded-xl glass flex items-center justify-center hover:bg-accent/50"
+              className="relative w-8 h-8 rounded-xl glass flex items-center justify-center hover:bg-accent/50 transition-colors"
+              title="الإشعارات"
             >
               <Bell className="w-4 h-4" />
               {nudge && (
@@ -111,7 +120,7 @@ export function Dashboard() {
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
               </div>
               <p className="text-xs flex-1" dir="rtl">{nudge.messageAr}</p>
-              <button onClick={() => setNudge(null)} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => setNudge(null)} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -121,8 +130,8 @@ export function Dashboard() {
 
       {/* Main grid */}
       <main className="relative z-10 flex-1 px-4 py-3 max-w-[1600px] mx-auto w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-3 h-[calc(100vh-120px)]">
-          {/* Left: chat + media + quick actions */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-3 h-[calc(100vh-120px)]">
+          {/* Left: quick actions + chat + media */}
           <div className="flex flex-col gap-3 min-h-0">
             {/* Quick actions bar */}
             <div className="glass-strong rounded-2xl px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-thin">
@@ -177,7 +186,7 @@ export function Dashboard() {
                   onChange={(t) => { setRightPanel(t); }}
                   compact
                 />
-                <button onClick={() => setMobileRightOpen(false)} className="w-8 h-8 rounded-lg glass flex items-center justify-center">
+                <button onClick={() => setMobileRightOpen(false)} className="w-8 h-8 rounded-lg glass flex items-center justify-center shrink-0">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -208,12 +217,12 @@ function RightPanelTabs({
   compact?: boolean
 }) {
   return (
-    <div className={`flex items-center gap-1 ${compact ? 'flex-1' : 'glass-strong rounded-3xl rounded-b-none p-1.5 border-b-0'}`}>
+    <div className={`flex items-center gap-1 ${compact ? 'flex-1 overflow-x-auto scrollbar-thin' : 'glass-strong rounded-3xl rounded-b-none p-1.5 border-b-0'}`}>
       {tabs.map((t) => (
         <button
           key={t.id}
           onClick={() => onChange(t.id)}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-medium transition-all ${
+          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-[11px] font-medium transition-all whitespace-nowrap ${
             active === t.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/30'
           }`}
         >
@@ -226,8 +235,10 @@ function RightPanelTabs({
 }
 
 function RightPanelContent({ tab }: { tab: RightTab }) {
+  if (tab === 'conversations') return <ConversationSidebar />
   if (tab === 'devices') return <DeviceGrid />
   if (tab === 'scenes') return <ScenePanel />
+  if (tab === 'routines') return <RoutinesPanel />
   if (tab === 'tools') return <McpToolsPanel />
   return <SettingsPanel />
 }
@@ -237,7 +248,6 @@ function ChatPanelWithBridge() {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as string
-      // Re-dispatch as a global window event the ChatPanel textarea can pick up
       window.dispatchEvent(new CustomEvent('anzaro-inject-input', { detail }))
     }
     window.addEventListener('anzaro-quick-send', handler)

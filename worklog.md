@@ -150,4 +150,93 @@ A `webDevReview` cron job runs every 15 minutes to: read this worklog, assess pr
 
 ---
 
-*Last updated: 2025-01-30 · All 8 phases verified via curl E2E + agent-browser*
+## Round 2 — webDevReview (2025-01-30)
+
+### Assessment
+Project was stable: all 8 phases implemented, lint clean, APIs verified. QA via agent-browser confirmed AuthScreen renders, guest login works (POST /api/auth/guest 200), onboarding Q1 appears. VLM analysis of auth screenshot confirmed: high visual quality, glassmorphism card, 3D orb with realistic shading. Issues noted: "IDLE" label low contrast, grid background opacity.
+
+### New Features Added
+
+1. **Voice Input (Web Speech API STT)** — `src/hooks/use-voice-input.ts`
+   - Mic button in ChatPanel with animated voice waveform (5 pulsing bars)
+   - Real-time interim transcript display while listening
+   - Smart Ball transitions to "listening" state when mic active
+   - Auto-detects browser support; gracefully hidden if unsupported
+   - Language: `ar-EG` (Egyptian Arabic)
+
+2. **Conversation History** — `src/app/api/conversations/{,list-messages,delete}/` + `ConversationSidebar.tsx`
+   - List all past conversations with title, message count, last message preview, time-ago
+   - Click to load full message history into chat (replaces current messages)
+   - Delete conversations with hover trash icon
+   - "New conversation" button clears current chat
+   - Animated list items with Framer Motion
+
+3. **Routines Panel** — `RoutinesPanel.tsx` (new right-panel tab)
+   - Lists AI-suggested + learned routines with confidence score
+   - "اقترح" button triggers `/api/routines` POST to generate a new routine based on personality + usage
+   - Shows trigger type (schedule/pattern), action count, learned source (AI/manual)
+   - Empty state with guidance
+
+4. **Weather + Prayer Widget** — `WeatherPrayerWidget.tsx` (in dashboard header)
+   - Live weather from Open-Meteo API (temperature, condition, humidity)
+   - Next prayer time from Aladhan API with countdown ("بعد 2 س 15 د")
+   - Auto-refreshes prayer countdown every 60 seconds
+   - Compact glassmorphism design in header (desktop)
+
+5. **Dashboard Enhancement**
+   - Right panel expanded from 4 → 6 tabs (conversations, devices, scenes, routines, tools, settings)
+   - Weather/prayer widget in header (desktop, 320px width)
+   - Tab bar now scrollable on mobile (whitespace-nowrap + scrollbar-thin)
+   - Right panel width increased to 400px for better content display
+
+### Styling Improvements
+
+- **Smart Ball label contrast**: Changed from `text-foreground/80` → `text-foreground` (Arabic) and `text-muted-foreground` → `text-primary/60 font-mono` (English). Much more readable.
+- **Voice waveform**: 5 animated bars with random heights + staggered delays when listening
+- **Mic button**: Pulses with `glow-primary` + `animate-pulse` when active, glass style when idle
+- **Conversation items**: Hover-reveal delete button, active state with primary border
+- **Routine cards**: Confidence badge, learned-source badge (AI violet vs manual primary)
+- **Empty states**: All new panels have centered icon + guidance text
+
+### Verification Results (curl E2E)
+```
+1. guest login → user created ✅
+2. onboard → persona: analytical, md len: 2346 ✅
+3. chat (media play) → intent: media, 1 action, Egyptian Arabic reply ✅
+4. conversations list → 1 conversation with title ✅
+5. routines → 0 (expected for new user) ✅
+6. weather → 26.4°C, 71% humidity ✅
+7. prayer → Fajr 04:23, Dhuhr 13:01, Maghrib 19:56 ✅
+8. system health → 8 phases, 35 users ✅
+9. browser dashboard → "أهلاً Abs 👋" + 6 suggestion buttons ✅
+```
+
+- `bun run lint` → 0 errors, 0 warnings ✅
+- agent-browser: AuthScreen + Onboarding + Dashboard all render correctly ✅
+
+### Files Created
+- `src/hooks/use-voice-input.ts` — Web Speech API STT hook
+- `src/components/anzaro/ConversationSidebar.tsx` — Conversation history UI
+- `src/components/anzaro/RoutinesPanel.tsx` — AI routines UI
+- `src/components/anzaro/WeatherPrayerWidget.tsx` — Weather + prayer times widget
+- `src/app/api/conversations/route.ts` — List + create conversations
+- `src/app/api/conversations/list-messages/route.ts` — Load conversation messages
+- `src/app/api/conversations/delete/route.ts` — Delete conversation
+
+### Files Modified
+- `src/components/anzaro/ChatPanel.tsx` — Added voice input mic button + waveform
+- `src/components/anzaro/Dashboard.tsx` — Added 2 new tabs, weather widget, wider right panel
+- `src/components/anzaro/SmartBall.tsx` — Improved label contrast
+- `src/app/globals.css` — (no changes needed, existing styles sufficient)
+
+### Unresolved Issues / Next-Phase Recommendations
+1. **TTS playback**: The Smart Ball should speak responses aloud (TTS). Add `/api/ai/tts` using z-ai-web-dev-sdk + Web Audio API playback.
+2. **SSE chat streaming**: Currently request/response. Upgrade to Server-Sent Events for token-by-token streaming.
+3. **Real Google OAuth**: Replace simulated account picker with real Google OAuth redirect (needs public URI).
+4. **Voice activation (wake word)**: Add "يا آنزارو" wake word detection for hands-free activation.
+5. **WebSocket for hardware Smart Ball**: Persistent connection for the physical Orange Pi device.
+6. **Proactive nudge scheduling**: Currently fetches on load; should use cron to push at specific times.
+
+---
+
+*Last updated: 2025-01-30 (Round 2) · All 8 phases + voice input + conversation history + routines + weather/prayer widget verified*

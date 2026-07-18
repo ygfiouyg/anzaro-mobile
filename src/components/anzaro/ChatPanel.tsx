@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 import {
   Send,
   Sparkles,
@@ -23,6 +24,8 @@ import {
   Briefcase,
   Video,
   Bot,
+  Mic,
+  MicOff,
   User as UserIcon,
 } from 'lucide-react'
 
@@ -45,11 +48,27 @@ export function ChatPanel() {
   const [sending, setSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // Voice input (Web Speech API STT)
+  const voice = useVoiceInput({
+    lang: 'ar-EG',
+    onResult: (text) => {
+      setInput((prev) => (prev ? prev + ' ' + text : text))
+      setBall({ status: 'processing', label: 'بفكّر', labelAr: 'بفكّر' })
+    },
+    onStateChange: (listening) => {
+      if (listening) {
+        setBall({ status: 'listening', label: 'بسمعك', labelAr: 'بسمعك' })
+      } else if (ball.status === 'listening') {
+        setBall({ status: 'idle', label: 'في انتظارك', labelAr: 'في انتظارك' })
+      }
+    },
+  })
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages])
+  }, [messages, voice.interim])
 
   // Listen for quick-action / external command injections
   useEffect(() => {
@@ -212,6 +231,36 @@ export function ChatPanel() {
 
       {/* Input */}
       <div className="px-5 py-4 border-t border-border/40">
+        {/* Voice listening indicator */}
+        <AnimatePresence>
+          {voice.listening && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/10 border border-primary/20"
+            >
+              <div className="flex items-end gap-0.5 h-4">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <span
+                    key={i}
+                    className="w-0.5 bg-primary rounded-full animate-pulse"
+                    style={{
+                      height: `${30 + Math.random() * 70}%`,
+                      animationDelay: `${i * 100}ms`,
+                      animationDuration: '600ms',
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="text-xs text-primary font-medium">بسمعك...</span>
+              {voice.interim && (
+                <span className="text-xs text-muted-foreground truncate flex-1" dir="rtl">{voice.interim}</span>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="flex items-end gap-2">
           <Textarea
             value={input}
@@ -222,11 +271,24 @@ export function ChatPanel() {
                 send()
               }
             }}
-            placeholder="اكتب لأنيزرو... (مثلاً: شغّل قرآن، اقفل النور، نفّس وضع السينما)"
+            placeholder={voice.listening ? 'بسمعك... اتكلم' : 'اكتب لـ Anzaro... (مثلاً: شغّل قرآن، اقفل النور، نفّس وضع السينما)'}
             className="resize-none min-h-[48px] max-h-32 rounded-2xl bg-input/50 border-border/40"
             dir="rtl"
             rows={1}
           />
+          {voice.supported && (
+            <Button
+              onClick={voice.toggle}
+              variant={voice.listening ? 'default' : 'ghost'}
+              size="icon"
+              className={`rounded-2xl h-12 w-12 shrink-0 transition-all ${
+                voice.listening ? 'bg-primary text-primary-foreground glow-primary animate-pulse' : 'glass hover:bg-accent/50'
+              }`}
+              title={voice.listening ? 'وقف التسجيل' : 'اتكلم لـ Anzaro'}
+            >
+              {voice.listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </Button>
+          )}
           <Button
             onClick={() => send()}
             disabled={sending || !input.trim()}

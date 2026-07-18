@@ -144,12 +144,12 @@ export function SmartBall({ size = 120, className, showLabel = true }: SmartBall
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.25 }}
-              className="text-sm font-medium text-foreground/80"
+              className="text-sm font-semibold text-foreground"
             >
               {ball.labelAr}
             </motion.p>
           </AnimatePresence>
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">
+          <p className="text-[10px] uppercase tracking-widest text-primary/60 mt-0.5 font-mono">
             {config.labelEn}
           </p>
         </div>
