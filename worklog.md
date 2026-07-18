@@ -488,3 +488,59 @@ Live HF Space verified: RUNNING, 68 tools, 16/19 keys healthy, Smart Ball comman
 ---
 
 *Last updated: 2025-01-30 (Round 12) · Model registry + progressive SSE + scene polish*
+
+---
+
+## Round 13 — Model Provider Dashboard + Activity History + Full Overlay Integration (2025-01-30)
+
+### QA Assessment
+Live HF Space verified: RUNNING, 68 tools, 5 scenes, progressive SSE streaming works, lint clean (0 errors). Platform stable.
+
+### What Was Done
+
+1. **ModelProviderDashboard component**:
+   - Visual model/provider status with 11+ provider labels (emojis + colors)
+   - Health indicator (healthy/critical) based on configured providers
+   - Configured/total provider counts
+   - Staggered entrance animations (Framer Motion)
+   - Provider entries sorted: configured first, then unconfigured
+
+2. **SmartBallHistory component** — activity timeline:
+   - Loads last 15 messages from most recent conversation
+   - Timeline dots with intent-specific icons (media=Radio, device=Lightbulb, scene=Clapperboard, chat=Bot)
+   - Intent badges with color coding (emerald/amber/violet/blue)
+   - User vs Anzaro labels + timestamps
+   - Content preview (first 120 chars, markdown/emojis stripped)
+   - Empty state with guidance
+
+3. **Full SmartBallOverlay integration** (now 9 tabs):
+   - Devices, Scenes, Routines, Calendar, Tools, Keys, **Models** (new), **History** (new), Profile
+   - SmartBallSuggestions panel (AI-generated suggestions based on usage + personality + time)
+   - Voice output toggle button (Volume2 icon, auto-speak on streaming complete)
+   - Weather toggle button (CloudSun icon)
+   - All 3 floating buttons: orb (bottom-40), weather (bottom-56), voice (bottom-72)
+
+### Verification Results (Live HF Space)
+```
+1. Space status → RUNNING ✅
+2. Home page → HTTP 200 ✅
+3. Login → token returned ✅
+4. Smart Ball progressive SSE → 4 chunks streamed ✅
+5. Tools API → 68 tools ✅
+6. Lint → 0 errors, 10 warnings (pre-existing) ✅
+```
+
+### Files Created
+- `src/components/anzaro/ModelProviderDashboard.tsx` — Visual model provider dashboard
+- `src/components/anzaro/SmartBallHistory.tsx` — Activity timeline
+
+### Files Modified
+- `src/components/anzaro/SmartBallOverlay.tsx` — added 2 new tabs + suggestions + voice output + auto-speak
+
+### Phase Status
+- Centralized Model Selector: ✅ DONE — ModelProviderDashboard UI + /api/anzaro/models endpoint
+- Phase 8 (Premium UI): ✅ ENHANCED — 9 tabs, staggered animations, timeline, floating buttons
+
+---
+
+*Last updated: 2025-01-30 (Round 13) · Model dashboard + history timeline + full 9-tab overlay*
