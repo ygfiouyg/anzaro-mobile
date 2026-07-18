@@ -14,7 +14,7 @@ import * as Haptics from 'expo-haptics';
 import { IdentityProvider, useIdentity } from './mobile/context/IdentityContext';
 import DashboardScreen from './mobile/screens/DashboardScreen';
 import ChatScreen from './mobile/screens/ChatScreen';
-import HomeAssistantScreen from './screens/HomeAssistantScreen';
+import HomeAssistantScreen from './mobile/screens/HomeAssistantScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import OnboardingBridgeScreen from './mobile/screens/OnboardingBridgeScreen';
 import { COLORS } from './config';
