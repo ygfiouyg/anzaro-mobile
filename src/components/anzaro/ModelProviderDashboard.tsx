@@ -142,9 +142,9 @@ export function ModelProviderDashboard() {
         })}
         {providerEntries.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Activity className="w-8 h-8 text-muted-foreground mb-2" />
-            <p className="text-xs text-muted-foreground">مفيش مزودين مسجلين</p>
-            <p className="text-[10px] text-muted-foreground/70 mt-1">ضيف مفاتيح API في إعدادات الـ Space</p>
+            <div className="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary animate-spin mb-3" />
+            <p className="text-xs text-muted-foreground">Syncing providers...</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-1">جاري مزامنة المزودين من الـ registry</p>
           </div>
         )}
       </div>

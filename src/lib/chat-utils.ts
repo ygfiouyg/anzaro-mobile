@@ -37,9 +37,14 @@ export async function chatWithFallback(
 ): Promise<ChatFallbackResult> {
   const tryZAI = async (): Promise<ChatFallbackResult> => {
     try {
+      // V.14: No hardcoded model fallback — require explicit model selection
+      const selectedModel = options.model ?? null;
+      if (!selectedModel) {
+        return { success: false, content: '', provider: 'zai', error: 'No model selected — sync providers from Dashboard' };
+      }
       const client = await getZAIClient();
       const completion = await client.chat.completions.create({
-        model: options.model || 'glm-5.2',
+        model: selectedModel,
         messages: messages as any,
         max_tokens: 65536,
         temperature: options.temperature ?? 1.0,

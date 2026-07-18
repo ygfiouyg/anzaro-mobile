@@ -241,7 +241,7 @@ export const useChatStore = create<ChatState>()(
     (set, get): ChatState => ({
       conversations: [],
       activeConversationId: null,
-      activeModel: 'glm-5-2',
+      activeModel: null as string | null, // V.14: No hardcoded fallback — user must select from Dashboard
       activeLanguage: 'egyptian',
       isStreaming: false,
       streamingProgress: null,

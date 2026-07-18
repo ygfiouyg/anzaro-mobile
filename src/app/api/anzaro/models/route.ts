@@ -9,17 +9,15 @@ export async function GET(req: Request) {
     const { user, response: authResp } = await requireAnzaroUser(req as any)
     if (authResp) return authResp
 
-    // Import the platform's model registry
+    // Import the platform's model registry — V.14: NO hardcoded fallback
     let models: any[] = []
     try {
-      const { ALL_MODELS, getModelById } = await import('@/lib/models')
-      models = ALL_MODELS || []
-    } catch {
-      // Fallback if models module isn't available
-      models = [
-        { id: 'delta-general', name: 'Anzaro General', provider: 'zai', glmModel: 'glm-4.6' },
-        { id: 'delta-creative', name: 'Anzaro Creative', provider: 'zai', glmModel: 'glm-4.6' },
-      ]
+      const mod = await import('@/lib/models')
+      // The export is named `models`, not `ALL_MODELS`
+      models = mod.models || mod.ALL_MODELS || []
+    } catch (e) {
+      // V.14: Return empty array — Dashboard shows "Syncing providers..." state
+      models = []
     }
 
     // Group by provider
