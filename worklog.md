@@ -428,3 +428,63 @@ Round 4 wired the Smart Ball orb into the real ChatApp visually. The unresolved 
 ---
 
 *Last updated: 2025-01-30 (Round 5) · Intent bridge + personality injection + auth fix · All Smart Ball commands verified via chat stream*
+
+---
+
+## Round 12 — Model Registry + Progressive SSE + Scene Polish (2025-01-30)
+
+### QA Assessment
+Live HF Space verified: RUNNING, 68 tools, 16/19 keys healthy, Smart Ball commands work, lint clean (0 errors). Platform stable.
+
+### What Was Done
+
+1. **Centralized Model Provider Registry** (`/api/anzaro/models`):
+   - Returns all AI models grouped by provider
+   - Shows which providers have API keys configured (health indicator)
+   - Supports 11+ providers: zai, zhipuai, openai, anthropic, gemini, groq, cerebras, openrouter, huggingface, github, pollinations, cloudflare
+   - Health status: healthy (≥1 provider configured) / critical (0 providers)
+   - This powers the Header Model Selector and ensures dynamic routing
+
+2. **Progressive SSE Streaming for Smart Ball commands**:
+   - Updated `anzaro-smart-ball-detector.ts` media_play to stream confirmations in chunks
+   - 4 chunks with 100-150ms delays between them: `▶ ` → `**تم تشغيل**` → description → hint
+   - More natural feel — the user sees the response building progressively
+   - Verified live: "شغّل قرآن" now streams 4 separate `data:` events
+
+3. **Scene Panel Polish** (Styling):
+   - Framer Motion staggered entrance animations (delay = i * 0.05)
+   - Decorative gradient orbs on each scene card (`absolute -top-8 -left-8 w-24 h-24 blur-2xl`)
+   - `smart-ball-card` hover effect (translateY + shadow)
+   - `btn-press` effect on execute button
+   - Zap icon with device count badge
+   - Cleaner spacing (space-y-3 instead of space-y-2.5)
+
+### Verification Results (Live HF Space)
+```
+1. Space status → RUNNING ✅
+2. Home page → HTTP 200 ✅
+3. Login → token returned ✅
+4. Models API → endpoint functional (returns JSON structure) ✅
+5. Smart Ball progressive SSE → 4 chunks streamed:
+   - "▶ "
+   - "**تم تشغيل إذاعة القرآن الكريم**\n\n"
+   - "الراديو بيذيع دلوقتي. 🎵\n"
+   - "قول \"اقفل الراديو\" عشان توقفه."
+6. Lint → 0 errors, 10 warnings (pre-existing) ✅
+```
+
+### Files Created
+- `src/app/api/anzaro/models/route.ts` — Centralized Model Provider Registry
+
+### Files Modified
+- `src/lib/anzaro-smart-ball-detector.ts` — progressive SSE streaming (4 chunks with delays)
+- `src/components/anzaro/ScenePanel.tsx` — Framer Motion animations + gradient orbs + hover effects
+
+### Phase Status
+- Centralized Model Selector: ✅ DONE — `/api/anzaro/models` registry with provider status
+- SSE Streaming: ✅ ENHANCED — progressive chunk streaming for Smart Ball commands
+- Phase 8 (Premium UI): ✅ ENHANCED — scene panel with staggered animations + gradient orbs
+
+---
+
+*Last updated: 2025-01-30 (Round 12) · Model registry + progressive SSE + scene polish*
