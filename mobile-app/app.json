@@ -26,7 +26,11 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f1e"
       },
-      "permissions": ["RECORD_AUDIO", "INTERNET", "VIBRATE"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "INTERNET",
+        "VIBRATE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -40,7 +44,14 @@
     "extra": {
       "ANZARO_API_URL": "https://kopabdo-delta-ai-v2.hf.space",
       "HASS_URL": "",
-      "HASS_TOKEN": ""
-    }
+      "HASS_TOKEN": "",
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
+      }
+    },
+    "owner": "anzaro"
   }
 }

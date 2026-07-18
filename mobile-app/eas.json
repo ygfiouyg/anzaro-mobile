@@ -1,7 +1,8 @@
 {
   "cli": {
     "version": ">= 5.0.0",
-    "promptToConfigurePushNotifications": false
+    "promptToConfigurePushNotifications": false,
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -36,13 +37,7 @@
   "submit": {
     "production": {
       "android": {
-        "serviceAccountKeyPath": "./google-service-account.json",
         "track": "internal"
-      },
-      "ios": {
-        "appleId": "kopabdo772@gmail.com",
-        "ascAppId": "com.anzaro.mobile",
-        "appleTeamId": ""
       }
     }
   }
