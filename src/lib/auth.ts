@@ -74,7 +74,9 @@ export async function hashPassword(password: string): Promise<string> {
  * Verify a password against a bcrypt hash (async)
  * Also supports legacy SHA256 hashes for backward compatibility during migration.
  */
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password: string, hash: string | null): Promise<boolean> {
+  // V.14: Guard against null hash (Google OAuth users have password: null)
+  if (!hash) return false;
   // If the hash looks like a bcrypt hash ($2a$, $2b$, $2y$), use bcrypt
   if (hash.startsWith('$2')) {
     return bcrypt.compare(password, hash);
@@ -88,7 +90,9 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 /**
  * Check if a hash is a legacy SHA256 hash (needs upgrade to bcrypt)
  */
-export function isLegacyHash(hash: string): boolean {
+export function isLegacyHash(hash: string | null): boolean {
+  // V.14: Guard against null hash
+  if (!hash) return false;
   return !hash.startsWith('$2');
 }
 

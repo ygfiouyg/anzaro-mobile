@@ -385,7 +385,7 @@ export async function POST(request: NextRequest) {
     let isHFDirectModel = false;
     let hfDirectModelId: string | null = null;
 
-    if (!modelConfig && model.startsWith('hf-chat:')) {
+    if (!modelConfig && model?.startsWith('hf-chat:')) {
       hfDirectModelId = model.slice(8); // Strip 'hf-chat:' prefix
 
       // Check if model is disabled by admin
@@ -442,7 +442,7 @@ export async function POST(request: NextRequest) {
       modelId: string | null;
     } | null = null;
 
-    if (!modelConfig && model.startsWith('custom:chat:')) {
+    if (!modelConfig && model?.startsWith('custom:chat:')) {
       const customModelId = model.split(':').slice(2).join(':');
       try {
         const customModel = await db.customModel.findUnique({ where: { id: customModelId } });
@@ -500,7 +500,7 @@ export async function POST(request: NextRequest) {
 
     // ── Reject image/video-only models in chat context ──
     // These models are for media generation, not chat
-    if (!modelConfig && (model.startsWith('hf-image:') || model.startsWith('hf-video:') || model.startsWith('custom:image:') || model.startsWith('custom:video:'))) {
+    if (!modelConfig && (model?.startsWith('hf-image:') || model?.startsWith('hf-video:') || model?.startsWith('custom:image:') || model?.startsWith('custom:video:'))) {
       const isImage = model.includes('image');
       const categoryLabel = isImage ? 'توليد الصور' : 'توليد الفيديو';
       return new Response(
