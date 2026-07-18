@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -23,7 +24,7 @@ export function MediaPlayer() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    fetch('/api/media/stations')
+    authFetch('/api/anzaro/media/stations')
       .then((r) => r.json())
       .then((d) => setStations(d.stations || []))
       .catch(() => {})
@@ -32,7 +33,7 @@ export function MediaPlayer() {
 
   async function refreshSession() {
     try {
-      const res = await fetch('/api/media/session')
+      const res = await authFetch('/api/anzaro/media/session')
       const data = await res.json()
       setMediaSession(data.session)
     } catch {}
@@ -41,7 +42,7 @@ export function MediaPlayer() {
   async function play(station: Station) {
     setLoading(true)
     try {
-      await fetch('/api/media/control', {
+      await authFetch('/api/anzaro/media/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'play', stationId: station.id }),
@@ -58,7 +59,7 @@ export function MediaPlayer() {
   async function control(action: 'pause' | 'resume' | 'stop') {
     setLoading(true)
     try {
-      await fetch('/api/media/control', {
+      await authFetch('/api/anzaro/media/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
@@ -73,7 +74,7 @@ export function MediaPlayer() {
 
   async function setVolume(v: number) {
     try {
-      await fetch('/api/media/control', {
+      await authFetch('/api/anzaro/media/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'volume', volume: v }),

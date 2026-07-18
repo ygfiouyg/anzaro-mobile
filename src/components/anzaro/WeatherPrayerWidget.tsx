@@ -46,12 +46,12 @@ export function WeatherPrayerWidget() {
     async function load() {
       try {
         const [wRes, pRes] = await Promise.all([
-          fetch('/api/mcp/weather', {
+          fetch('/api/anzaro/mcp/weather', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ lat: 30.04, lon: 31.24, name: 'Cairo' }),
           }),
-          fetch('/api/mcp/prayer', {
+          fetch('/api/anzaro/mcp/prayer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ city: 'Cairo', country: 'Egypt' }),

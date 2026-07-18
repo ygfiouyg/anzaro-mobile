@@ -50,6 +50,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { useChatStore } from '@/store/chat-store';
+import { useSmartBallStore } from '@/lib/smart-ball-store';
 import { useAuthStore } from '@/store/auth-store';
 import { getModelById } from '@/lib/models';
 import { ModelSelector } from './ModelSelector';
@@ -328,6 +329,9 @@ export function ChatHeader({ onToggleSidebar, onToggleFilesPanel, onToggleSkills
             </>
           )}
         </button>
+
+        {/* Smart Ball status pill — shows ball state + personality type */}
+        <SmartBallStatusPill />
 
         {/* Spacer */}
         <div className="flex-1" />
@@ -749,5 +753,61 @@ export function ChatHeader({ onToggleSidebar, onToggleFilesPanel, onToggleSkills
       <KnowledgeBasePanel open={knowledgeBaseOpen} onOpenChange={setKnowledgeBaseOpen} />
       <VoiceChatOverlay isOpen={voiceChatOpen} onClose={() => setVoiceChatOpen(false)} />
     </>
+  );
+}
+
+// ── Smart Ball Status Pill ──
+// Shows a compact ball-state indicator + personality type in the chat header.
+// Clicking it opens the Smart Ball overlay (via the orb button).
+function SmartBallStatusPill() {
+  const ball = useSmartBallStore((s) => s.ball);
+  const [personaType, setPersonaType] = useState<string | null>(null);
+  const token = useAuthStore((s) => s.token);
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/anzaro/personality/profile', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (active && data.profile) setPersonaType(data.profile.personaType);
+      } catch {}
+    })();
+    return () => { active = false };
+  }, [token]);
+
+  const statusColor =
+    ball.status === 'processing' ? 'bg-amber-400' :
+    ball.status === 'executing' ? 'bg-emerald-400' :
+    ball.status === 'listening' ? 'bg-blue-400' :
+    ball.status === 'speaking' ? 'bg-violet-400' :
+    'bg-muted-foreground/40';
+
+  const personaLabel =
+    personaType === 'leader' ? 'قائد' :
+    personaType === 'analytical' ? 'محلل' :
+    personaType === 'creative' ? 'مبدع' :
+    personaType === 'emotional' ? 'عاطفي' :
+    personaType === 'balanced' ? 'متوازن' : null;
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-muted/40 border border-border/40">
+      {/* Ball status dot */}
+      <span className={cn('w-2 h-2 rounded-full animate-pulse-dot', statusColor)} />
+      {/* Ball label (compact) */}
+      <span className="text-[10px] font-medium text-muted-foreground hidden sm:inline">
+        {ball.labelAr}
+      </span>
+      {/* Divider + persona */}
+      {personaLabel && (
+        <>
+          <span className="w-px h-3 bg-border/60" />
+          <span className="text-[10px] font-semibold text-primary">{personaLabel}</span>
+        </>
+      )}
+    </div>
   );
 }

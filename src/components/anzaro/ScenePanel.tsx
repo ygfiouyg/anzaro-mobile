@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -37,7 +38,7 @@ export function ScenePanel() {
   const refreshDevices = useSmartBallStore((s) => s.setDevices)
 
   useEffect(() => {
-    fetch('/api/scenes')
+    authFetch('/api/anzaro/scenes')
       .then((r) => r.json())
       .then((d) => setScenes(d.scenes || []))
       .catch(() => {})
@@ -46,7 +47,7 @@ export function ScenePanel() {
   async function execute(scene: Scene) {
     setExecuting(scene.id)
     try {
-      const res = await fetch('/api/scenes/execute', {
+      const res = await authFetch('/api/anzaro/scenes/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sceneId: scene.id }),
@@ -55,7 +56,7 @@ export function ScenePanel() {
       if (data.ok) {
         toast.success(`نفّذت ${scene.nameAr} — ${data.results.length} جهاز اتعدّل`)
         // refresh devices
-        const dr = await fetch('/api/devices')
+        const dr = await authFetch('/api/anzaro/devices')
         const dd = await dr.json()
         refreshDevices(dd.devices || [])
       } else {

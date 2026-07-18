@@ -32,7 +32,7 @@ export function McpToolsPanel() {
   const [testing, setTesting] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/mcp/tools')
+    fetch('/api/anzaro/mcp/tools')
       .then((r) => r.json())
       .then((d) => setTools(d.tools || []))
       .catch(() => {})
@@ -43,19 +43,19 @@ export function McpToolsPanel() {
     try {
       let res: Response
       if (tool.name === 'prayer_times') {
-        res = await fetch('/api/mcp/prayer', {
+        res = await fetch('/api/anzaro/mcp/prayer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ city: 'Cairo', country: 'Egypt' }),
         })
       } else if (tool.name === 'weather') {
-        res = await fetch('/api/mcp/weather', {
+        res = await fetch('/api/anzaro/mcp/weather', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lat: 30.04, lon: 31.24, name: 'Cairo' }),
         })
       } else if (tool.name === 'web_search') {
-        res = await fetch('/api/mcp/search', {
+        res = await fetch('/api/anzaro/mcp/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: 'latest AI news' }),

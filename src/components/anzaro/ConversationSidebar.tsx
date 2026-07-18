@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,7 @@ export function ConversationSidebar({ onClose }: { onClose?: () => void }) {
 
   async function refresh() {
     try {
-      const res = await fetch('/api/conversations')
+      const res = await authFetch('/api/anzaro/conversations')
       const data = await res.json()
       setItems(data.conversations || [])
     } catch {}
@@ -47,7 +48,7 @@ export function ConversationSidebar({ onClose }: { onClose?: () => void }) {
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/conversations/list-messages?id=${id}`)
+      const res = await authFetch(`/api/anzaro/conversations/list-messages?id=${id}`)
       const data = await res.json()
       if (data.messages) {
         clearMessages()

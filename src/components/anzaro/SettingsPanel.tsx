@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
@@ -36,13 +37,13 @@ export function SettingsPanel() {
   const [tab, setTab] = useState<'profile' | 'theme' | 'health'>('profile')
 
   useEffect(() => {
-    fetch('/api/system/health').then((r) => r.json()).then(setHealth).catch(() => {})
+    authFetch('/api/anzaro/system/health').then((r) => r.json()).then(setHealth).catch(() => {})
   }, [])
 
   async function updateTheme(themePreset: string, hue: number) {
     setHue(hue)
     try {
-      await fetch('/api/personality/theme', {
+      await authFetch('/api/anzaro/personality/theme', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ themePreset }),

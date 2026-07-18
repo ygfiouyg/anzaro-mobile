@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
@@ -24,7 +25,7 @@ export function DeviceGrid() {
 
   async function refresh() {
     try {
-      const res = await fetch('/api/devices')
+      const res = await authFetch('/api/anzaro/devices')
       const data = await res.json()
       setDevices(data.devices || [])
     } catch {}
@@ -39,7 +40,7 @@ export function DeviceGrid() {
     // optimistic
     updateDevice(device.id, { state: action === 'turn_on' ? 'on' : 'off' })
     try {
-      await fetch('/api/devices', {
+      await authFetch('/api/anzaro/devices', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: device.id, action }),
@@ -54,7 +55,7 @@ export function DeviceGrid() {
   async function setBrightness(device: any, value: number) {
     updateDevice(device.id, { attributesJson: JSON.stringify({ ...parseAttrs(device.attributesJson), brightness: value }) })
     try {
-      await fetch('/api/devices', {
+      await authFetch('/api/anzaro/devices', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: device.id, action: 'set_state', params: { brightness: value } }),
@@ -65,7 +66,7 @@ export function DeviceGrid() {
   async function addAlias(device: any) {
     if (!aliasText.trim()) return
     try {
-      const res = await fetch('/api/devices', {
+      const res = await authFetch('/api/anzaro/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: device.id, alias: aliasText.trim(), lang: 'ar' }),

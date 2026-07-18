@@ -233,6 +233,40 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Smart Ball Command Detection (Reversed Command Control) ──
+    // لو المستخدم طلب تشغيل/إيقاف راديو، تحكم في جهاز، أو تفعيل مشهد مزاجي
+    // نفّذ الأمر فوراً عبر control-engine وأرجع تأكيد
+    if (!hasEmbeddedAttachments) {
+      try {
+        const { detectSmartBallCommand } = await import('@/lib/anzaro-smart-ball-detector');
+        const ballCommand = await detectSmartBallCommand(message);
+        if (ballCommand) {
+          console.log(`[Chat] Smart Ball command detected: ${ballCommand.type}`);
+          const ballStream = new ReadableStream({
+            async start(controller) {
+              const encoder = new TextEncoder();
+              const sink = (text: string) => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: text })}\n\n`));
+              };
+              try {
+                await ballCommand.execute(sink);
+              } catch (e: any) {
+                sink(`\n\n❌ خطأ: ${e.message}`);
+              } finally {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.close();
+              }
+            },
+          });
+          return new Response(ballStream, {
+            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+          });
+        }
+      } catch (ballError) {
+        console.warn('[Chat] Smart Ball detection failed:', ballError);
+      }
+    }
+
     // ── Intent Detection (Script Writer + Content Studio) ──
     // لو المستخدم طلب سكريبت أو حزمة محتوى، حوّل للأداة المناسبة
     try {
@@ -569,6 +603,27 @@ export async function POST(request: NextRequest) {
     const isOpenMode = promptResult.isOpenMode;
     const searchResults = promptResult.searchResults;
     const searchPerformed = promptResult.searchPerformed;
+
+    // ── Personality Profile Injection (Smart Ball Adaptive Mirroring) ──
+    // لو المستخدم عمل personality onboarding، حقن الـ user_personality.md
+    // في الـ system prompt عشان الـ AI يكيّف نبرته ولهجته حسب شخصية المستخدم
+    if (user?.id) {
+      try {
+        const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } });
+        if (profile) {
+          const personalityAddon = `\n\n═══ ملف شخصية المستخدم (user_personality.md) ═══\n${profile.markdown}\n\n═══ توجيهات التكيّف ═══\n- نوع الشخصية: ${profile.personaType}\n- اللهجة المفضلة: ${profile.dialect}\n- القيادة: ${profile.leadership}/100 | العناد: ${profile.stubbornness}/100 | التحليل: ${profile.analytical}/100\n- عدّل نبرتك لتكمل شخصية المستخدم — لو قائد، كون مختصر وحاسم؛ لو عاطفي، كون داعم ودافي.\n- ناديه باسم "${profile.name}" مرة واحدة كحد أقصى في الرد، كأخ أكبر ثقة.\n- ارفع عداد التفاعلات.`;
+          systemPrompt += personalityAddon;
+          // Increment interaction count (Phase 7.1 — adaptive memory)
+          await db.personalityProfile.update({
+            where: { userId: user.id },
+            data: { interactionCount: { increment: 1 } },
+          }).catch(() => {});
+          console.log(`[Chat] Personality profile injected: ${profile.personaType}, interaction #${profile.interactionCount + 1}`);
+        }
+      } catch (profileError) {
+        console.warn('[Chat] Personality profile injection failed:', profileError);
+      }
+    }
 
     // ── RAG Context Injection ──
     // If the conversation has uploaded lectures, search them for relevant context
@@ -1905,7 +1960,7 @@ export async function POST(request: NextRequest) {
                 let preToolResult: { toolName: string; result: any } | null = null;
 
                 // ── كاشف الأسئلة — لو المستخدم بيسأل (مش بيأمر) → ما تـ triggerش أدوات ──
-                const isQuestion = /^(ايه|إيه|شنو|كام|ليه|ازاي|إزاي|امتى|إمتى|فين|مين|هل|ممكن|تقدر|تعرف|تقول|بتاعتك|بتاعك|الخاص|بتاع|عرفني|اشرحلي|فهمني|كيف|متى|أين|من|ما هو|ما هي|ايه هو|إيه هو|ايه رايك|إيه رأيك|/prism/i.test(userText.trim())
+                const isQuestion = /^(ايه|إيه|شنو|كام|ليه|ازاي|إزاي|امتى|إمتى|فين|مين|هل|ممكن|تقدر|تعرف|تقول|بتاعتك|بتاعك|الخاص|بتاع|عرفني|اشرحلي|فهمني|كيف|متى|أين|من|ما هو|ما هي|ايه هو|إيه هو|ايه رايك|إيه رأيك)/i.test(userText.trim())
                   || /كام|كم/i.test(userText) && /ذاكر|memory|context|كونتكست/i.test(userText)
                   // أي جملة مش فيها فعل أمر صريح = سؤال
                   || !/(?:اعمل|أنشئ|انشئ|حط|ضيف|هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دورلي|دور\s*لي|ابحث|امسح|احذف|شيل|ارفع|احفظ|اكتب|لخص|حلل|اقرا|افتكر|ذكرني|فكرني|نبهني|سجل|ابعت|ارسل|نبه|خزن)/i.test(userText);

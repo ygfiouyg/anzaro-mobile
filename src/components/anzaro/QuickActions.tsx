@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { toast } from 'sonner'
@@ -30,7 +31,7 @@ export function QuickActions({ onFire }: { onFire: (command: string) => void }) 
 
   async function refresh() {
     try {
-      const res = await fetch('/api/quickactions')
+      const res = await authFetch('/api/anzaro/quickactions')
       const data = await res.json()
       setActions(data.actions || [])
     } catch {}
@@ -40,7 +41,7 @@ export function QuickActions({ onFire }: { onFire: (command: string) => void }) 
     let active = true
     ;(async () => {
       try {
-        const res = await fetch('/api/quickactions')
+        const res = await authFetch('/api/anzaro/quickactions')
         const data = await res.json()
         if (active) setActions(data.actions || [])
       } catch {}
@@ -52,7 +53,7 @@ export function QuickActions({ onFire }: { onFire: (command: string) => void }) 
 
   async function fire(a: QuickAction) {
     onFire(a.command)
-    fetch('/api/quickactions', {
+    authFetch('/api/anzaro/quickactions', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: a.id }),
@@ -63,7 +64,7 @@ export function QuickActions({ onFire }: { onFire: (command: string) => void }) 
   async function add() {
     if (!newLabel.trim()) return
     try {
-      await fetch('/api/quickactions', {
+      await authFetch('/api/anzaro/quickactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: newLabel, command: newLabel, actionType: 'natural' }),

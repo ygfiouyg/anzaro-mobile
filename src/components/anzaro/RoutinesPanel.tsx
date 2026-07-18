@@ -1,5 +1,6 @@
 'use client'
 
+import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
@@ -27,7 +28,7 @@ export function RoutinesPanel() {
 
   async function refresh() {
     try {
-      const res = await fetch('/api/routines')
+      const res = await authFetch('/api/anzaro/routines')
       const data = await res.json()
       setRoutines(data.routines || [])
     } catch {}
@@ -40,7 +41,7 @@ export function RoutinesPanel() {
   async function suggest() {
     setSuggesting(true)
     try {
-      const res = await fetch('/api/routines', {
+      const res = await authFetch('/api/anzaro/routines', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: 'اقترح روتين ذكي' }),
