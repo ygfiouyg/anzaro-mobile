@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
@@ -18,7 +18,7 @@ interface ConvItem {
 }
 
 export function ConversationSidebar({ onClose }: { onClose?: () => void }) {
-  const { conversationId, setConversationId, clearMessages, addMessage, setBall } = useAppStore()
+  const { conversationId, setConversationId, clearMessages, addMessage, setBall } = useSmartBallStore()
   const [items, setItems] = useState<ConvItem[]>([])
   const [loading, setLoading] = useState(false)
 

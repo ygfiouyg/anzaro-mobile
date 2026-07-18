@@ -1,190 +1,208 @@
-import { cookies } from 'next/headers'
-import { db } from './db'
-import crypto from 'crypto'
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import { db } from '@/lib/db';
+import { getSessionSecret } from '@/lib/session-secret';
 
-const SESSION_COOKIE = 'anzaro_session'
-const SESSION_DAYS = 30
+// ═══════════════════════════════════════════════════════════════════════
+// Session Lookup Cache — LRU with 60s TTL
+// ═══════════════════════════════════════════════════════════════════════
+// Every authenticated API call hits getUserFromToken(), which queries the DB.
+// This in-memory cache reduces DB load for high-traffic scenarios.
+// Cache is invalidated on session expiry (TTL) and on logout/password change.
+// ═══════════════════════════════════════════════════════════════════════
 
-export interface SessionUser {
-  id: string
-  email: string
-  name: string | null
-  avatarUrl: string | null
-  isGuest: boolean
-  role: string
-  dialect: string
-  themePreset: string
+interface CachedSession {
+  user: NonNullable<Awaited<ReturnType<typeof db.user.findUnique>>>;
+  expiresAt: Date;
+  cachedAt: number; // Unix ms
 }
 
-function randomToken(): string {
-  return crypto.randomBytes(32).toString('hex')
+const SESSION_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+const MAX_CACHE_SIZE = 500;
+const sessionCache = new Map<string, CachedSession>();
+
+/**
+ * Get session duration in days from environment variable.
+ * Defaults to 30 days. Set SESSION_DURATION_DAYS to change.
+ */
+export function getSessionDurationDays(): number {
+  const envVal = process.env.SESSION_DURATION_DAYS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 365) {
+      return parsed;
+    }
+  }
+  return 30;
 }
 
-export async function createSession(userId: string): Promise<string> {
-  const token = randomToken()
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000)
-  await db.session.create({ data: { token, userId, expiresAt } })
-  return token
+/**
+ * Invalidate a cached session (call on logout, password change, etc.)
+ */
+export function invalidateSessionCache(token: string): void {
+  sessionCache.delete(token);
 }
 
-export async function setSessionCookie(token: string) {
-  const store = await cookies()
-  store.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: SESSION_DAYS * 24 * 60 * 60,
-  })
+/**
+ * Invalidate all cached sessions (call on password change for a user)
+ */
+export function invalidateAllUserSessionsCache(userId: string): void {
+  for (const [token, cached] of sessionCache.entries()) {
+    if (cached.user.id === userId) {
+      sessionCache.delete(token);
+    }
+  }
 }
 
-export async function clearSessionCookie() {
-  const store = await cookies()
-  store.delete(SESSION_COOKIE)
+// ═══════════════════════════════════════════════════════════════════════
+// Password Hashing — bcrypt with auto-salt (12 rounds)
+// ═══════════════════════════════════════════════════════════════════════
+// Previously used SHA256 without salt — vulnerable to rainbow table attacks.
+// Now uses bcrypt (cost factor 12) which is purpose-built for passwords.
+// ═══════════════════════════════════════════════════════════════════════
+
+const BCRYPT_ROUNDS = 12;
+
+/**
+ * Hash a password using bcrypt (async — generates unique salt automatically)
+ */
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
-  try {
-    const store = await cookies()
-    const token = store.get(SESSION_COOKIE)?.value
-    if (!token) return null
-    const session = await db.session.findUnique({
-      where: { token },
-      include: { user: true },
-    })
-    if (!session || session.expiresAt < new Date()) {
-      if (session) {
-        await db.session.delete({ where: { id: session.id } }).catch(() => {})
+/**
+ * Verify a password against a bcrypt hash (async)
+ * Also supports legacy SHA256 hashes for backward compatibility during migration.
+ */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  // If the hash looks like a bcrypt hash ($2a$, $2b$, $2y$), use bcrypt
+  if (hash.startsWith('$2')) {
+    return bcrypt.compare(password, hash);
+  }
+  // Legacy SHA256 fallback — allows existing users to log in after migration
+  // Their hash will be upgraded to bcrypt on next login via the login route
+  const sha256Hash = crypto.createHash('sha256').update(password).digest('hex');
+  return sha256Hash === hash;
+}
+
+/**
+ * Check if a hash is a legacy SHA256 hash (needs upgrade to bcrypt)
+ */
+export function isLegacyHash(hash: string): boolean {
+  return !hash.startsWith('$2');
+}
+
+/**
+ * Generate a random session token
+ */
+export function generateToken(): string {
+  // Generate a HMAC-signed session token for tamper resistance
+  // Priority: process.env.SESSION_SECRET → embedded fallback
+  const secret = getSessionSecret();
+  const payload = crypto.randomUUID();
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex').slice(0, 16);
+  return `${payload}.${signature}`;
+}
+
+/**
+ * Look up a session by token and return the associated user.
+ * Returns null if session not found, expired, or user not active.
+ */
+export async function getUserFromToken(token: string | null) {
+  if (!token) return null;
+
+  // ── Check session cache first ──
+  const cached = sessionCache.get(token);
+  if (cached) {
+    const now = Date.now();
+    // Check cache TTL
+    if (now - cached.cachedAt < SESSION_CACHE_TTL_MS) {
+      // Check if session is still valid
+      if (new Date() < cached.expiresAt && cached.user.isActive) {
+        return cached.user;
       }
-      return null
+      // Session expired or user inactive — remove from cache
+      sessionCache.delete(token);
     }
-    const u = session.user
-    return {
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      avatarUrl: u.avatarUrl,
-      isGuest: u.isGuest,
-      role: u.role,
-      dialect: u.dialect,
-      themePreset: u.themePreset,
-    }
-  } catch {
-    return null
   }
+
+  // ── Cache miss — query database ──
+  const session = await db.session.findUnique({
+    where: { token },
+    include: { user: true },
+  });
+
+  if (!session) return null;
+
+  // Check if session has expired
+  if (new Date() > session.expiresAt) {
+    // Clean up expired session
+    await db.session.delete({ where: { id: session.id } }).catch(() => {});
+    sessionCache.delete(token);
+    return null;
+  }
+
+  // Check if user is active
+  if (!session.user.isActive) return null;
+
+  // ── Cache the session ──
+  // Evict oldest entries if cache is full
+  if (sessionCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = sessionCache.keys().next().value;
+    if (oldestKey) sessionCache.delete(oldestKey);
+  }
+  sessionCache.set(token, {
+    user: session.user,
+    expiresAt: session.expiresAt,
+    cachedAt: Date.now(),
+  });
+
+  return session.user;
 }
 
-export async function requireUser(): Promise<SessionUser> {
-  const user = await getSessionUser()
-  if (!user) throw new Error('UNAUTHORIZED')
-  return user
+/**
+ * Extract Bearer token from Authorization header
+ */
+export function extractBearerToken(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
+  return parts[1];
 }
 
-// Create a guest user with a profile bound to browser storage concept.
-// In this local-first demo we persist guest to DB so the session survives refresh.
-export async function createGuestUser(): Promise<SessionUser> {
-  const guestId = `guest_${crypto.randomBytes(6).toString('hex')}`
-  const user = await db.user.create({
+/**
+ * Rotate a session token — replace the old token with a new one.
+ * This is a security measure that limits the damage if a token is compromised:
+ * even if an attacker steals a token, it will be replaced within 24 hours.
+ *
+ * The old token is deleted and a new one is created with the same expiry.
+ * The client must update its stored token from the `rotatedToken` field
+ * returned by the /api/auth/me endpoint.
+ */
+export async function rotateSessionToken(oldToken: string, userId: string): Promise<string> {
+  // Find the existing session
+  const session = await db.session.findUnique({ where: { token: oldToken } });
+  if (!session) {
+    throw new Error('Session not found for rotation');
+  }
+
+  // Generate new token
+  const newToken = generateToken();
+
+  // Create new session with same expiry, then delete old one
+  await db.session.create({
     data: {
-      email: `${guestId}@guest.anzaro.local`,
-      name: 'Guest',
-      isGuest: true,
-      dialect: 'egyptian',
-      themePreset: 'aurora',
+      token: newToken,
+      userId,
+      expiresAt: session.expiresAt,
     },
-  })
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    avatarUrl: user.avatarUrl,
-    isGuest: true,
-    role: user.role,
-    dialect: user.dialect,
-    themePreset: user.themePreset,
-  }
-}
+  });
 
-// Migrate a guest account into a Google account (Phase 7.4)
-export async function migrateGuestToGoogle(
-  guestUserId: string,
-  googleProfile: { googleId: string; email: string; name: string; avatarUrl?: string }
-): Promise<SessionUser> {
-  // Check if a real account already exists for this googleId/email
-  const existing = await db.user.findFirst({
-    where: {
-      OR: [{ googleId: googleProfile.googleId }, { email: googleProfile.email }],
-    },
-  })
+  await db.session.delete({ where: { id: session.id } });
 
-  if (existing && existing.id === guestUserId) {
-    // already linked
-    const updated = await db.user.update({
-      where: { id: guestUserId },
-      data: {
-        googleId: googleProfile.googleId,
-        email: googleProfile.email,
-        name: googleProfile.name,
-        avatarUrl: googleProfile.avatarUrl ?? null,
-        isGuest: false,
-      },
-    })
-    return toSessionUser(updated)
-  }
+  // Update caches
+  invalidateSessionCache(oldToken);
 
-  if (existing) {
-    // Merge guest data into existing account, then delete guest
-    const [profile, quickActions, routines, nudges] = await Promise.all([
-      db.personalityProfile.findUnique({ where: { userId: guestUserId } }),
-      db.quickAction.findMany({ where: { userId: guestUserId } }),
-      db.routine.findMany({ where: { userId: guestUserId } }),
-      db.proactiveNudge.findMany({ where: { userId: guestUserId } }),
-    ])
-
-    if (profile && !(await db.personalityProfile.findUnique({ where: { userId: existing.id } }))) {
-      await db.personalityProfile.update({
-        where: { userId: guestUserId },
-        data: { userId: existing.id },
-      })
-    }
-    if (quickActions.length) {
-      await db.quickAction.updateMany({ where: { userId: guestUserId }, data: { userId: existing.id } })
-    }
-    if (routines.length) {
-      await db.routine.updateMany({ where: { userId: guestUserId }, data: { userId: existing.id } })
-    }
-    if (nudges.length) {
-      await db.proactiveNudge.updateMany({ where: { userId: guestUserId }, data: { userId: existing.id } })
-    }
-    // delete the now-empty guest
-    await db.user.delete({ where: { id: guestUserId } }).catch(() => {})
-    return toSessionUser(existing)
-  }
-
-  // No existing account — promote the guest in place
-  const updated = await db.user.update({
-    where: { id: guestUserId },
-    data: {
-      googleId: googleProfile.googleId,
-      email: googleProfile.email,
-      name: googleProfile.name,
-      avatarUrl: googleProfile.avatarUrl ?? null,
-      isGuest: false,
-    },
-  })
-  return toSessionUser(updated)
-}
-
-function toSessionUser(u: Awaited<ReturnType<typeof db.user.findUnique>>): SessionUser {
-  if (!u) throw new Error('USER_NOT_FOUND')
-  return {
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    avatarUrl: u.avatarUrl,
-    isGuest: u.isGuest,
-    role: u.role,
-    dialect: u.dialect,
-    themePreset: u.themePreset,
-  }
+  console.log(`[Auth] Rotated session token for user ${userId}`);
+  return newToken;
 }

@@ -1,48 +1,45 @@
-import { NextResponse } from 'next/server'
-import { getSessionUser, migrateGuestToGoogle, createSession, setSessionCookie } from '@/lib/auth'
-import { ensureSeedData } from '@/lib/seed'
+/**
+ * GET /api/auth/google
+ * يبدأ Google OAuth flow (email + profile scopes فقط — بدون verification)
+ */
 
-// Phase 4: Google OAuth 2.0 (simulated account selector)
-// In production this would redirect to Google's consent screen.
-// Here we accept the chosen profile and bind it to the account, migrating
-// any guest personality profile (Phase 7.4) into the permanent Google account.
-export async function POST(req: Request) {
-  try {
-    await ensureSeedData()
-    const body = await req.json().catch(() => ({}))
-    const { googleId, email, name, avatarUrl } = body as {
-      googleId?: string
-      email?: string
-      name?: string
-      avatarUrl?: string
-    }
+import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 
-    if (!googleId || !email) {
-      return NextResponse.json({ error: 'googleId and email are required' }, { status: 400 })
-    }
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-    const current = await getSessionUser()
-    const userId = current?.id
-    if (!userId) {
-      // No existing session — create a fresh bound account
-      const guest = await createGuestUserCaller()
-      const migrated = await migrateGuestToGoogle(guest.id, { googleId, email, name: name ?? email, avatarUrl })
-      const token = await createSession(migrated.id)
-      await setSessionCookie(token)
-      return NextResponse.json({ user: migrated, token, migrated: true })
-    }
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const REDIRECT_URI = `${process.env.ANZARO_PUBLIC_URL || process.env.DELTAAI_PUBLIC_URL || 'https://kopabdo-delta-ai-v2.hf.space'}/api/auth/google/callback`;
 
-    const migrated = await migrateGuestToGoogle(userId, { googleId, email, name: name ?? email, avatarUrl })
-    const token = await createSession(migrated.id)
-    await setSessionCookie(token)
-    return NextResponse.json({ user: migrated, token, migrated: current.isGuest })
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+export async function GET() {
+  if (!GOOGLE_CLIENT_ID) {
+    return NextResponse.json({ error: 'GOOGLE_CLIENT_ID not configured' }, { status: 500 });
   }
-}
 
-// helper to avoid circular import of createGuestUser naming
-async function createGuestUserCaller() {
-  const { createGuestUser } = await import('@/lib/auth')
-  return createGuestUser()
+  // Generate state for security
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'email profile', // بس — بدون verification
+    state,
+    prompt: 'select_account',
+  });
+
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+
+  // Store state in cookie
+  const response = NextResponse.redirect(authUrl);
+  response.cookies.set('google_oauth_state', state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 600,
+  });
+
+  return response;
 }

@@ -1,0 +1,586 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?                    // bcrypt hash (12 rounds)
+  role          String    @default("user") // "user" | "admin"
+  avatar        String?
+  language      String    @default("ar")   // "ar" | "en" | "egyptian"
+  streak        Int       @default(0)      // نظام الرتب
+  maxTokens     Int       @default(60000)  // Admin-controlled max tokens per account (platform max: 60000)
+  isActive      Boolean   @default(true)
+  isVerified    Boolean   @default(false)
+  lastSeen      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  conversations Conversation[]
+  sessions      Session[]
+  messages      Message[]
+  assets        GenerativeAsset[]
+  podcasts      Podcast[]
+  otpCodes      OtpCode[]
+  memories      UserMemory[]
+  achievements      UserAchievement[]
+  challengeCompletions ChallengeCompletion[]
+  stats             UserStats?
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  type      String   @default("verification") // "verification" | "reset"
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code, type])
+  @@index([email, type, isUsed])
+  @@index([expiresAt])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  title       String?
+  model       String   @default("delta-general")
+  language    String   @default("ar")
+  context     String?  // "general" | "islamic" | "code" | "creative" | "science" | "medical"
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@index([userId])
+  @@index([userId, updatedAt]) // Composite index for sidebar sorting queries
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  content        String
+  role           String   // "user" | "assistant" | "system"
+  model          String?
+  emotion        String?  // "happy" | "supportive" | "excited" | "calm" | "thoughtful"
+  quoteUsed      String?
+  language       String   @default("ar")
+  attachments    String?  // JSON array
+  pdfUrl         String?  // Generated PDF URL
+  isEdited       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([userId])
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  device      String?
+  ip          String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AdminSettings {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             String   // JSON string
+  category          String   @default("general") // "general" | "ai" | "radio" | "voice" | "pdf"
+  description       String?
+  updatedAt         DateTime @updatedAt
+}
+
+model GenerativeAsset {
+  id          String   @id @default(cuid())
+  type        String   // "pdf" | "image" | "audio" | "video"
+  title       String
+  prompt      String?
+  filePath    String
+  fileSize    Int?
+  metadata    String?  // JSON
+  model       String?
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Podcast {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  audioUrl    String
+  duration    Int?
+  episode     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+}
+
+model RadioStation {
+  id          String   @id @default(cuid())
+  name        String
+  streamUrl   String
+  logo        String?
+  category    String   @default("islamic") // "islamic" | "music" | "news" | "quran"
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([isActive])
+  @@index([category])
+}
+
+model VoiceBroadcast {
+  id          String   @id @default(cuid())
+  title       String?
+  audioUrl    String
+  duration    Int?
+  isActive    Boolean  @default(true)
+  playedCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ═══════════════════════════════════════════════════════════
+// نماذج المُجمّع (Aggregator) — إدارة نقاط نهاية API
+// ═══════════════════════════════════════════════════════════
+
+model ApiEndpoint {
+  id               String   @id @default(cuid())
+  name             String
+  provider         String
+  category         String   // "chat" | "image" | "video" | "asr" | "translation"
+  baseUrl          String
+  modelId          String?
+  apiKey           String?
+  authType         String   @default("none") // "none" | "bearer" | "x-api-key" | "custom"
+  authHeader       String?
+  apiFormat        String   @default("openai") // "openai" | "hf-inference" | "pollinations" | "raw" | "gemini"
+  sourceRepo       String?
+  sourceUrl        String?
+  isFree           Boolean  @default(false)
+  isAvailable      Boolean  @default(true)
+  priority         Int      @default(50)
+  consecutiveFails Int      @default(0)
+  successRate      Float    @default(0)
+  avgResponseMs    Float    @default(0)
+  lastValidatedAt  DateTime?
+  lastError        String?
+  capabilities     String?  // JSON
+  metadata         String?  // JSON
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  validationLogs ApiValidationLog[]
+
+  @@index([category])
+  @@index([provider])
+  @@index([isAvailable])
+  @@index([priority])
+}
+
+model UserMemory {
+  id          String   @id @default(cuid())
+  userId      String
+  category    String   // "style", "interest", "language", "preference"
+  key         String   // e.g. "writing_style", "topic_engineering", "dialect"
+  value       String   // e.g. "casual", "frequent", "egyptian"
+  confidence  Float    @default(0.5) // 0-1, how confident are we
+  sourceCount Int      @default(1)   // how many times we observed this
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, key])
+}
+
+model ApiValidationLog {
+  id           String   @id @default(cuid())
+  endpointId   String
+  status       String   // "success" | "fail" | "timeout" | "rate_limited"
+  responseMs   Int
+  statusCode   Int?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  endpoint ApiEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+}
+
+model ApiAggregationJob {
+  id                String   @id @default(cuid())
+  type              String   // "scrape" | "validate" | "full_cycle"
+  status            String   @default("pending") // "pending" | "running" | "completed" | "failed"
+  sourcesScraped    Int      @default(0)
+  endpointsFound    Int      @default(0)
+  endpointsValidated Int     @default(0)
+  endpointsAdded    Int      @default(0)
+  endpointsRemoved  Int      @default(0)
+  errors            String?  // JSON array
+  duration          Int      @default(0)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([type])
+}
+
+// ═══════════════════════════════════════════════════════════
+// نظام التحديات والإنجازات (Gamification)
+// ═══════════════════════════════════════════════════════════
+
+model Achievement {
+  id          String   @id @default(cuid())
+  key         String   @unique  // e.g. "first_chat", "streak_7", "quiz_master"
+  titleAr     String             // Arabic title
+  titleEn     String             // English title
+  descriptionAr String
+  descriptionEn String
+  icon        String             // emoji
+  category    String   @default("general") // "general" | "chat" | "learning" | "creative" | "social"
+  points      Int      @default(10)
+  requirement Int      @default(1)  // how many times to trigger
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  unlocks UserAchievement[]
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+model DailyChallenge {
+  id          String   @id @default(cuid())
+  titleAr     String
+  titleEn     String
+  descriptionAr String
+  descriptionEn String
+  type        String   // "chat" | "quiz" | "document" | "image" | "mindmap" | "code"
+  targetCount Int      @default(1)
+  points      Int      @default(50)
+  day         String   @unique // "2024-01-15" format
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  completions ChallengeCompletion[]
+}
+
+model ChallengeCompletion {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  completedAt DateTime @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+  @@index([userId])
+}
+
+model UserStats {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  totalPoints     Int      @default(0)
+  level           Int      @default(1)
+  totalChats      Int      @default(0)
+  totalQuizzes    Int      @default(0)
+  totalDocuments  Int      @default(0)
+  totalImages     Int      @default(0)
+  totalMindmaps   Int      @default(0)
+  totalCodeExecs  Int      @default(0)
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastActiveDate  String?  // "2024-01-15" format
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════════════════════
+// برومبتس النظام — إدارة وتجاوز البرومبتس الافتراضية
+// ═══════════════════════════════════════════════════════════
+
+model SystemPromptOverride {
+  id            String   @id @default(cuid())
+  key           String   @unique   // e.g. "model:gpt-4o", "feature:content-strategy"
+  category      String              // "model" | "feature" | "agent"
+  label         String              // Human-readable name in Arabic
+  labelEn       String              // Human-readable name in English
+  description   String?             // What this prompt does
+  sourceFile    String?             // Where the original prompt lives e.g. "src/lib/models.ts"
+  sourceKey     String?             // The field/variable name in the source
+  value         String              // The current/overridden prompt text
+  originalValue String?             // The hardcoded default (for reset)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([key])
+}
+
+model HFDisabledModel {
+  id         String   @id @default(cuid())
+  modelId    String   @unique
+  disabledBy String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@map("hf_disabled_models")
+}
+
+model CustomModel {
+  id          String   @id @default(cuid())
+  name        String
+  nameEn      String
+  category    String   // "chat" | "image" | "video" | "asr" | "translation"
+  provider    String   // e.g., "pollinations", "groq", "openai"
+  baseUrl     String
+  modelId     String?  // The actual model ID to send to the API
+  apiKey      String?
+  authType    String   @default("none") // "none" | "bearer" | "x-api-key" | "custom"
+  authHeader  String?
+  apiFormat   String   @default("openai") // "openai" | "hf-inference" | "pollinations" | "gemini" | "raw"
+  isFree      Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  priority    Int      @default(50)
+  icon        String   @default("⚡")
+  description String?
+  descriptionEn String?
+  sourceEndpointId String? // Link back to the ApiEndpoint it came from
+  addedBy     String?
+  capabilities String? // JSON
+  metadata    String?  // JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("custom_models")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// نظام ذاكرة المستندات — Document Memory System
+// ═══════════════════════════════════════════════════════════════════════
+// When a user uploads files for compilation, the FULL extracted text of every
+// file is stored here so the model can "remember" all content. The memory
+// persists until the user confirms they're satisfied with the result.
+//
+// Lifecycle: uploaded → analyzing → generated → awaiting_feedback
+//            → satisfied (memory cleared) | revising (redo with feedback)
+// ═══════════════════════════════════════════════════════════════════════
+
+model DocumentMemory {
+  id          String   @id @default(cuid())
+  // Session/user identifier (uses session token hash or user id)
+  ownerId     String
+  // The user's verbatim request (e.g. "اجمع كل القوانين في ملف واحد")
+  userRequest String
+  // Status of the compilation flow
+  status      String   @default("uploaded") // uploaded|analyzing|generated|awaiting_feedback|satisfied|revising
+  // JSON array of { name, text } — FULL extracted text of every file
+  filesJson   String
+  // Count of files stored
+  fileCount   Int      @default(0)
+  // Total characters of extracted text
+  totalChars  Int      @default(0)
+  // The last generated PDF path (if any)
+  lastPdfPath String?
+  // User feedback for revision (if status=revising)
+  feedback    String?
+  // Language
+  language    String   @default("ar")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("document_memory")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// نظام الـ Jobs — MCP ↔ n8n Integration
+// ═══════════════════════════════════════════════════════════════════════
+// لما الـ Agent يـ trigger n8n workflow طويل (فيديو، رفع يوتيوب، إلخ)
+// بنـ create job هنا، نـ POST لـ n8n webhook (async)، ونرجّع job_id فوراً.
+// n8n بيشتغل لوحده، ولما يخلص بينادي على /api/mcp/job-complete.
+// الـ Frontend بـ poll /api/mcp/jobs/[id] عشان يشوف الـ status.
+// ═══════════════════════════════════════════════════════════════════════
+
+model McpJob {
+  id            String   @id @default(cuid())
+  // نوع الـ workflow (e.g. "video_creation", "youtube_upload", "email_campaign")
+  type          String
+  // status: pending | running | done | failed | cancelled
+  status        String   @default("pending")
+  // اسم الـ MCP tool اللي بدأ الـ job
+  sourceTool    String?
+  // JSON: المدخلات اللي اتبعتت لـ n8n
+  inputsJson    String?
+  // JSON: النتيجة اللي n8n رجّعها
+  resultJson    String?
+  // رسالة خطأ لو الـ status = failed
+  errorMessage  String?
+  // URL الـ n8n webhook اللي اتبعت
+  webhookUrl    String?
+  // معرف المستخدم اللي بدأ الـ job (اختياري)
+  ownerId       String?
+  // timestamps لكل مرحلة
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // progress optional (0-100)
+  progress      Int      @default(0)
+
+  // الخطوات الفرعية للـ job (each step in the workflow)
+  steps         JobStep[]
+
+  @@index([status])
+  @@index([type])
+  @@index([ownerId])
+  @@index([createdAt])
+  @@map("mcp_jobs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Job Steps — تتبع تفصيلي لكل خطوة في الـ workflow
+// ═══════════════════════════════════════════════════════════════════════
+// كل job ممكن يكون فيه عدة خطوات (script → image → video → upload).
+// كل خطوة ليها status + startedAt + completedAt + output.
+// n8n بينادي على PATCH /api/mcp/jobs/[id]/steps/[stepName] عشان يـ update كل خطوة.
+// ═══════════════════════════════════════════════════════════════════════
+
+model JobStep {
+  id          String   @id @default(cuid())
+  jobId       String
+  job         McpJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  // اسم الخطوة (e.g. "script", "image", "video", "tts", "upload")
+  stepName    String
+  // status: pending | running | done | failed | skipped
+  status      String   @default("pending")
+  // JSON: نتيجة الخطوة (e.g. { script: "...", image_url: "..." })
+  outputJson  String?
+  // رسالة خطأ لو فشلت الخطوة
+  errorMessage String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([jobId, stepName])
+  @@index([jobId])
+  @@index([status])
+  @@map("mcp_job_steps")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Agent Builder Studio — Custom Agents designed by the user
+// ═══════════════════════════════════════════════════════════════════════
+
+model CustomAgent {
+  id              String   @id @default(cuid())
+  name            String
+  nameEn          String?
+  description     String
+  icon            String   @default("🤖")
+  color           String   @default("from-violet-500 to-fuchsia-500")
+  systemPrompt    String
+  toolsJson       String
+  suggestionsJson String?
+  category        String   @default("custom")
+  isPublic        Boolean  @default(false)
+  runCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([category])
+  @@index([isPublic])
+  @@map("custom_agents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// External MCP Servers — DeltaAI as MCP Client
+// ═══════════════════════════════════════════════════════════════════════
+// Users can add external MCP servers (by URL) and DeltaAI will connect
+// to them, fetch their tools, and make those tools available to agents.
+// This makes DeltaAI an MCP *client* (in addition to being an MCP server).
+// ═══════════════════════════════════════════════════════════════════════
+
+model ExternalMcpServer {
+  id            String   @id @default(cuid())
+  name          String
+  url           String
+  // Transport type: "streamable-http" (default) or "stdio" (local only)
+  transport     String   @default("streamable-http")
+  // Optional bearer token for auth
+  authToken     String?
+  // Optional: which agents can use this server (null = all)
+  ownerId       String?
+  // Whether this server is enabled (can be toggled without deleting)
+  isEnabled     Boolean  @default(true)
+  // Cached tool count (updated when tools are fetched)
+  toolCount     Int      @default(0)
+  // Cached tool names (JSON array) — for quick listing without re-fetching
+  toolsCacheJson String?
+  // Last time we successfully connected
+  lastConnectedAt DateTime?
+  // Last error message (if connection failed)
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@index([ownerId])
+  @@map("external_mcp_servers")
+}

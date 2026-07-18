@@ -1,9 +1,12 @@
-import type { Metadata } from "next";
+export const dynamic = 'force-dynamic';
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Cairo } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as SonnerToaster } from "@/components/ui/sonner";
-import { AppProviders } from "@/components/providers/app-providers";
+import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/providers/theme-provider";
+import { DirectionProvider } from "@/components/providers/direction-provider";
+import { FixTransparentColors } from "@/components/FixTransparentColors";
+import { ErrorSuppressor } from "@/components/ErrorSuppressor";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,26 +20,41 @@ const geistMono = Geist_Mono({
 
 const cairo = Cairo({
   variable: "--font-cairo",
-  subsets: ["arabic", "latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  subsets: ["arabic", "latin", "latin-ext"],
+  weight: ["200", "300", "400", "500", "600", "700", "800", "900"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Anzaro AI — The Smart Ball",
-  description:
-    "Anzaro AI: a local-first AI Home OS. Personality-aware companion inside The Smart Ball — reversed command control, Home Assistant authority, and proactive intelligence.",
-  keywords: [
-    "Anzaro AI",
-    "Smart Ball",
-    "AI Home OS",
-    "Home Assistant",
-    "Personality AI",
-    "Voice Assistant",
-  ],
-  authors: [{ name: "Anzaro" }],
+  title: "Anzaro AI — ذكاء اصطناعي عربي",
+  description: "Anzaro AI — منصة الذكاء الاصطناعي العربي. شات، توليد صور، بودكاست، راديو، والمزيد.",
+  keywords: ["Anzaro AI", "انزارو", "AI", "Arabic AI", "ذكاء اصطناعي", "شات", "توليد صور", "بودكاست"],
+  authors: [{ name: "Anzaro AI" }],
   icons: {
-    icon: "/logo.svg",
+    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
+  openGraph: {
+    title: "Anzaro AI — ذكاء اصطناعي عربي",
+    description: "منصة الذكاء الاصطناعي العربي. شات، توليد صور، بودكاست، راديو، والمزيد.",
+    siteName: "Anzaro AI",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Anzaro AI — ذكاء اصطناعي عربي",
+    description: "منصة الذكاء الاصطناعي العربي",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -47,13 +65,32 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${cairo.variable} antialiased bg-background text-foreground`}
+        className={`${geistSans.variable} ${geistMono.variable} ${cairo.variable} antialiased bg-background text-foreground font-[family-name:var(--font-cairo)]`}
       >
-        <AppProviders>
-          {children}
-        </AppProviders>
-        <Toaster />
-        <SonnerToaster position="top-center" richColors />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange={false}
+        >
+          <DirectionProvider>
+            <FixTransparentColors />
+      <ErrorSuppressor />
+            {children}
+          </DirectionProvider>
+          <Toaster
+            position="top-center"
+            richColors
+            closeButton
+            dir="auto"
+            toastOptions={{
+              style: {
+                borderRadius: "14px",
+                fontFamily: "var(--font-cairo), -apple-system, sans-serif",
+              },
+            }}
+          />
+        </ThemeProvider>
       </body>
     </html>
   );

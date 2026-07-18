@@ -1,7 +1,3 @@
-// Anzaro AI — Local-First AI Home OS
-// Schema supports: Auth (Google+Guest), Personality Profiling, Media Control,
-// Home Assistant devices, Mood Scenes, Quick Actions, MCP Tools, Routines, Chat
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,59 +7,761 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ───────────────────────── AUTH ─────────────────────────
-
 model User {
-  id            String     @id @default(cuid())
-  email         String     @unique
+  id            String    @id @default(cuid())
+  email         String    @unique
   name          String?
-  avatarUrl     String?
-  googleId      String?    @unique
-  isGuest       Boolean    @default(false)
-  role          String     @default("user") // user | admin
-  dialect       String     @default("egyptian") // egyptian | khaleeji | levantine | msa | english
-  themePreset   String     @default("aurora") // aurora | leadership | creative | calm
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  password      String?                    // bcrypt hash (12 rounds)
+  role          String    @default("user") // "user" | "admin"
+  avatar        String?
+  language      String    @default("ar")   // "ar" | "en" | "egyptian"
+  streak        Int       @default(0)      // نظام الرتب
+  maxTokens     Int       @default(60000)  // Admin-controlled max tokens per account (platform max: 60000)
+  isActive      Boolean   @default(true)
+  isVerified    Boolean   @default(false)
+  lastSeen      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  profile       PersonalityProfile?
   conversations Conversation[]
-  mediaSessions MediaSession[]
-  quickActions  QuickAction[]
-  routines      Routine[]
-  nudges        ProactiveNudge[]
-  messages      Message[]
   sessions      Session[]
-
-  @@index([googleId])
+  messages      Message[]
+  assets        GenerativeAsset[]
+  podcasts      Podcast[]
+  otpCodes      OtpCode[]
+  memories      UserMemory[]
+spotifyToken  SpotifyToken?
+  integrations     UserIntegration[]
+  achievements      UserAchievement[]
+  challengeCompletions ChallengeCompletion[]
+  stats             UserStats?
+  personalityProfile PersonalityProfile?
+  devices           Device[]
+  mediaSessions     MediaSession[]
+  quickActions      QuickAction[]
+  routines          Routine[]
+  nudges            ProactiveNudge[]
 }
 
-model Session {
+model OtpCode {
   id        String   @id @default(cuid())
-  token     String   @unique
-  userId    String
+  email     String
+  code      String
+  type      String   @default("verification") // "verification" | "reset"
+  isUsed    Boolean  @default(false)
   expiresAt DateTime
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code, type])
+  @@index([email, type, isUsed])
+  @@index([expiresAt])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  title       String?
+  model       String   @default("delta-general")
+  language    String   @default("ar")
+  context     String?  // "general" | "islamic" | "code" | "creative" | "science" | "medical"
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@index([userId])
+  @@index([userId, updatedAt]) // Composite index for sidebar sorting queries
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  content        String
+  role           String   // "user" | "assistant" | "system"
+  model          String?
+  emotion        String?  // "happy" | "supportive" | "excited" | "calm" | "thoughtful"
+  quoteUsed      String?
+  language       String   @default("ar")
+  attachments    String?  // JSON array
+  pdfUrl         String?  // Generated PDF URL
+  isEdited       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([userId])
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  device      String?
+  ip          String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AdminSettings {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             String   // JSON string
+  category          String   @default("general") // "general" | "ai" | "radio" | "voice" | "pdf"
+  description       String?
+  updatedAt         DateTime @updatedAt
+}
+
+model GenerativeAsset {
+  id          String   @id @default(cuid())
+  type        String   // "pdf" | "image" | "audio" | "video"
+  title       String
+  prompt      String?
+  filePath    String
+  fileSize    Int?
+  metadata    String?  // JSON
+  model       String?
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
-// ─────────────────── PERSONALITY PROFILING ───────────────────
+model Podcast {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  audioUrl    String
+  duration    Int?
+  episode     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+}
+
+model RadioStation {
+  id          String   @id @default(cuid())
+  name        String
+  streamUrl   String
+  logo        String?
+  category    String   @default("islamic") // "islamic" | "music" | "news" | "quran"
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([isActive])
+  @@index([category])
+}
+
+model VoiceBroadcast {
+  id          String   @id @default(cuid())
+  title       String?
+  audioUrl    String
+  duration    Int?
+  isActive    Boolean  @default(true)
+  playedCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ═══════════════════════════════════════════════════════════
+// نماذج المُجمّع (Aggregator) — إدارة نقاط نهاية API
+// ═══════════════════════════════════════════════════════════
+
+model ApiEndpoint {
+  id               String   @id @default(cuid())
+  name             String
+  provider         String
+  category         String   // "chat" | "image" | "video" | "asr" | "translation"
+  baseUrl          String
+  modelId          String?
+  apiKey           String?
+  authType         String   @default("none") // "none" | "bearer" | "x-api-key" | "custom"
+  authHeader       String?
+  apiFormat        String   @default("openai") // "openai" | "hf-inference" | "pollinations" | "raw" | "gemini"
+  sourceRepo       String?
+  sourceUrl        String?
+  isFree           Boolean  @default(false)
+  isAvailable      Boolean  @default(true)
+  priority         Int      @default(50)
+  consecutiveFails Int      @default(0)
+  successRate      Float    @default(0)
+  avgResponseMs    Float    @default(0)
+  lastValidatedAt  DateTime?
+  lastError        String?
+  capabilities     String?  // JSON
+  metadata         String?  // JSON
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  validationLogs ApiValidationLog[]
+
+  @@index([category])
+  @@index([provider])
+  @@index([isAvailable])
+  @@index([priority])
+}
+
+model UserMemory {
+  id          String   @id @default(cuid())
+  userId      String
+  category    String   // "style", "interest", "language", "preference"
+  key         String   // e.g. "writing_style", "topic_engineering", "dialect"
+  value       String   // e.g. "casual", "frequent", "egyptian"
+  confidence  Float    @default(0.5) // 0-1, how confident are we
+  sourceCount Int      @default(1)   // how many times we observed this
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, key])
+}
+
+model ApiValidationLog {
+  id           String   @id @default(cuid())
+  endpointId   String
+  status       String   // "success" | "fail" | "timeout" | "rate_limited"
+  responseMs   Int
+  statusCode   Int?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  endpoint ApiEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+}
+
+model ApiAggregationJob {
+  id                String   @id @default(cuid())
+  type              String   // "scrape" | "validate" | "full_cycle"
+  status            String   @default("pending") // "pending" | "running" | "completed" | "failed"
+  sourcesScraped    Int      @default(0)
+  endpointsFound    Int      @default(0)
+  endpointsValidated Int     @default(0)
+  endpointsAdded    Int      @default(0)
+  endpointsRemoved  Int      @default(0)
+  errors            String?  // JSON array
+  duration          Int      @default(0)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([type])
+}
+
+// ═══════════════════════════════════════════════════════════
+// نظام التحديات والإنجازات (Gamification)
+// ═══════════════════════════════════════════════════════════
+
+model Achievement {
+  id          String   @id @default(cuid())
+  key         String   @unique  // e.g. "first_chat", "streak_7", "quiz_master"
+  titleAr     String             // Arabic title
+  titleEn     String             // English title
+  descriptionAr String
+  descriptionEn String
+  icon        String             // emoji
+  category    String   @default("general") // "general" | "chat" | "learning" | "creative" | "social"
+  points      Int      @default(10)
+  requirement Int      @default(1)  // how many times to trigger
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  unlocks UserAchievement[]
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+model DailyChallenge {
+  id          String   @id @default(cuid())
+  titleAr     String
+  titleEn     String
+  descriptionAr String
+  descriptionEn String
+  type        String   // "chat" | "quiz" | "document" | "image" | "mindmap" | "code"
+  targetCount Int      @default(1)
+  points      Int      @default(50)
+  day         String   @unique // "2024-01-15" format
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  completions ChallengeCompletion[]
+}
+
+model ChallengeCompletion {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  completedAt DateTime @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+  @@index([userId])
+}
+
+model UserStats {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  totalPoints     Int      @default(0)
+  level           Int      @default(1)
+  totalChats      Int      @default(0)
+  totalQuizzes    Int      @default(0)
+  totalDocuments  Int      @default(0)
+  totalImages     Int      @default(0)
+  totalMindmaps   Int      @default(0)
+  totalCodeExecs  Int      @default(0)
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastActiveDate  String?  // "2024-01-15" format
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lastActiveDate])
+}
+
+// ═══════════════════════════════════════════════════════════
+// برومبتس النظام — إدارة وتجاوز البرومبتس الافتراضية
+// ═══════════════════════════════════════════════════════════
+
+model SystemPromptOverride {
+  id            String   @id @default(cuid())
+  key           String   @unique   // e.g. "model:gpt-4o", "feature:content-strategy"
+  category      String              // "model" | "feature" | "agent"
+  label         String              // Human-readable name in Arabic
+  labelEn       String              // Human-readable name in English
+  description   String?             // What this prompt does
+  sourceFile    String?             // Where the original prompt lives e.g. "src/lib/models.ts"
+  sourceKey     String?             // The field/variable name in the source
+  value         String              // The current/overridden prompt text
+  originalValue String?             // The hardcoded default (for reset)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([key])
+}
+
+model HFDisabledModel {
+  id         String   @id @default(cuid())
+  modelId    String   @unique
+  disabledBy String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@map("hf_disabled_models")
+}
+
+model CustomModel {
+  id          String   @id @default(cuid())
+  name        String
+  nameEn      String
+  category    String   // "chat" | "image" | "video" | "asr" | "translation"
+  provider    String   // e.g., "pollinations", "groq", "openai"
+  baseUrl     String
+  modelId     String?  // The actual model ID to send to the API
+  apiKey      String?
+  authType    String   @default("none") // "none" | "bearer" | "x-api-key" | "custom"
+  authHeader  String?
+  apiFormat   String   @default("openai") // "openai" | "hf-inference" | "pollinations" | "gemini" | "raw"
+  isFree      Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  priority    Int      @default(50)
+  icon        String   @default("⚡")
+  description String?
+  descriptionEn String?
+  sourceEndpointId String? // Link back to the ApiEndpoint it came from
+  addedBy     String?
+  capabilities String? // JSON
+  metadata    String?  // JSON
+  maxTokens   Int?     // Context window size (null = auto-detect)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("custom_models")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// GitHub Skill Importer — مهارات مسحوبة من GitHub repos
+// ═══════════════════════════════════════════════════════════════════════
+model GitHubSkill {
+  id          String   @id @default(cuid())
+  githubUrl   String   @unique
+  repoName    String
+  repoOwner   String
+  name        String
+  description String
+  skillMd     String   
+  toolsNeeded String?  
+  status      String   @default("pending") // pending | approved | rejected
+  submittedBy String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  fileSize    Int?
+  fileCount   Int?
+  aiReview    String?  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@map("github_skills")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Installed Tools — أدوات مسحوبة من GitHub وتتنفّذ فعلياً
+// ═══════════════════════════════════════════════════════════════════════
+model InstalledTool {
+  id            String   @id @default(cuid())
+  githubUrl     String   @unique
+  repoName      String
+  repoOwner     String
+  toolName      String   @unique // الاسم في الـ registry
+  displayName   String
+  description   String
+  // JSON schema للـ parameters
+  parameters    String   
+  // الكود التنفيذي (entry function code)
+  executeCode   String   
+  // كل ملفات الـ repo كـ JSON: [{path, content}]
+  codeFiles     String   
+  // dependencies المطلوبة
+  dependencies  String?  
+  // AI analysis
+  aiReview      String?  
+  status        String   @default("pending") // pending | approved | rejected
+  submittedBy   String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  fileCount     Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([toolName])
+  @@map("installed_tools")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Anzaro Apps — تطبيقات كاملة مسحوبة من GitHub (frontend + backend)
+// ═══════════════════════════════════════════════════════════════════════
+model AnzaroApp {
+  id            String   @id @default(cuid())
+  githubUrl     String   @unique
+  repoName      String
+  repoOwner     String
+  appName       String   @unique // slug للـ URL: /app/flight-booking
+  displayName   String
+  description   String
+  icon          String   @default("📱")
+  // HTML كامل للـ frontend (يدعم CSS + JS inline)
+  frontendHtml  String   
+  // JavaScript functions للـ backend كـ JSON: {functionName: code}
+  backendCode   String   
+  // API endpoints كـ JSON: [{path, method, functionName}]
+  apiRoutes     String?  
+  // كل ملفات الـ repo الأصلية كـ JSON
+  sourceFiles   String?  
+  // AI analysis
+  aiReview      String?  
+  status        String   @default("pending") // pending | approved | rejected
+  category      String   @default("utility") // utility | productivity | entertainment | education | tools
+  submittedBy   String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  fileCount     Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([appName])
+  @@map("anzaro_apps")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// نظام ذاكرة المستندات — Document Memory System
+// ═══════════════════════════════════════════════════════════════════════
+// When a user uploads files for compilation, the FULL extracted text of every
+// file is stored here so the model can "remember" all content. The memory
+// persists until the user confirms they're satisfied with the result.
+//
+// Lifecycle: uploaded → analyzing → generated → awaiting_feedback
+//            → satisfied (memory cleared) | revising (redo with feedback)
+// ═══════════════════════════════════════════════════════════════════════
+
+model DocumentMemory {
+  id          String   @id @default(cuid())
+  // Session/user identifier (uses session token hash or user id)
+  ownerId     String
+  // The user's verbatim request (e.g. "اجمع كل القوانين في ملف واحد")
+  userRequest String
+  // Status of the compilation flow
+  status      String   @default("uploaded") // uploaded|analyzing|generated|awaiting_feedback|satisfied|revising
+  // JSON array of { name, text } — FULL extracted text of every file
+  filesJson   String
+  // Count of files stored
+  fileCount   Int      @default(0)
+  // Total characters of extracted text
+  totalChars  Int      @default(0)
+  // The last generated PDF path (if any)
+  lastPdfPath String?
+  // User feedback for revision (if status=revising)
+  feedback    String?
+  // Language
+  language    String   @default("ar")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("document_memory")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// نظام الـ Jobs — MCP ↔ n8n Integration
+// ═══════════════════════════════════════════════════════════════════════
+// لما الـ Agent يـ trigger n8n workflow طويل (فيديو، رفع يوتيوب، إلخ)
+// بنـ create job هنا، نـ POST لـ n8n webhook (async)، ونرجّع job_id فوراً.
+// n8n بيشتغل لوحده، ولما يخلص بينادي على /api/mcp/job-complete.
+// الـ Frontend بـ poll /api/mcp/jobs/[id] عشان يشوف الـ status.
+// ═══════════════════════════════════════════════════════════════════════
+
+model McpJob {
+  id            String   @id @default(cuid())
+  // نوع الـ workflow (e.g. "video_creation", "youtube_upload", "email_campaign")
+  type          String
+  // status: pending | running | done | failed | cancelled
+  status        String   @default("pending")
+  // اسم الـ MCP tool اللي بدأ الـ job
+  sourceTool    String?
+  // JSON: المدخلات اللي اتبعتت لـ n8n
+  inputsJson    String?
+  // JSON: النتيجة اللي n8n رجّعها
+  resultJson    String?
+  // رسالة خطأ لو الـ status = failed
+  errorMessage  String?
+  // URL الـ n8n webhook اللي اتبعت
+  webhookUrl    String?
+  // معرف المستخدم اللي بدأ الـ job (اختياري)
+  ownerId       String?
+  // timestamps لكل مرحلة
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // progress optional (0-100)
+  progress      Int      @default(0)
+
+  // الخطوات الفرعية للـ job (each step in the workflow)
+  steps         JobStep[]
+
+  @@index([status])
+  @@index([type])
+  @@index([ownerId])
+  @@index([createdAt])
+  @@map("mcp_jobs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Job Steps — تتبع تفصيلي لكل خطوة في الـ workflow
+// ═══════════════════════════════════════════════════════════════════════
+// كل job ممكن يكون فيه عدة خطوات (script → image → video → upload).
+// كل خطوة ليها status + startedAt + completedAt + output.
+// n8n بينادي على PATCH /api/mcp/jobs/[id]/steps/[stepName] عشان يـ update كل خطوة.
+// ═══════════════════════════════════════════════════════════════════════
+
+model JobStep {
+  id          String   @id @default(cuid())
+  jobId       String
+  job         McpJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  // اسم الخطوة (e.g. "script", "image", "video", "tts", "upload")
+  stepName    String
+  // status: pending | running | done | failed | skipped
+  status      String   @default("pending")
+  // JSON: نتيجة الخطوة (e.g. { script: "...", image_url: "..." })
+  outputJson  String?
+  // رسالة خطأ لو فشلت الخطوة
+  errorMessage String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([jobId, stepName])
+  @@index([jobId])
+  @@index([status])
+  @@map("mcp_job_steps")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Agent Builder Studio — Custom Agents designed by the user
+// ═══════════════════════════════════════════════════════════════════════
+
+model CustomAgent {
+  id              String   @id @default(cuid())
+  name            String
+  nameEn          String?
+  description     String
+  icon            String   @default("🤖")
+  color           String   @default("from-violet-500 to-fuchsia-500")
+  systemPrompt    String
+  toolsJson       String
+  suggestionsJson String?
+  category        String   @default("custom")
+  isPublic        Boolean  @default(false)
+  runCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([category])
+  @@index([isPublic])
+  @@map("custom_agents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// External MCP Servers — DeltaAI as MCP Client
+// ═══════════════════════════════════════════════════════════════════════
+// Users can add external MCP servers (by URL) and DeltaAI will connect
+// to them, fetch their tools, and make those tools available to agents.
+// This makes DeltaAI an MCP *client* (in addition to being an MCP server).
+// ═══════════════════════════════════════════════════════════════════════
+
+model ExternalMcpServer {
+  id            String   @id @default(cuid())
+  name          String
+  url           String
+  // Transport type: "streamable-http" (default) or "stdio" (local only)
+  transport     String   @default("streamable-http")
+  // Optional bearer token for auth
+  authToken     String?
+  // Optional: which agents can use this server (null = all)
+  ownerId       String?
+  // Whether this server is enabled (can be toggled without deleting)
+  isEnabled     Boolean  @default(true)
+  // Cached tool count (updated when tools are fetched)
+  toolCount     Int      @default(0)
+  // Cached tool names (JSON array) — for quick listing without re-fetching
+  toolsCacheJson String?
+  // Last time we successfully connected
+  lastConnectedAt DateTime?
+  // Last error message (if connection failed)
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@index([ownerId])
+  @@map("external_mcp_servers")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Spotify OAuth Tokens — لتشغيل الموسيقى (محتاج Spotify Premium)
+// ═══════════════════════════════════════════════════════════════════════
+model SpotifyToken {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken   String
+  refreshToken  String
+  expiresAt     DateTime
+  scope         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("spotify_tokens")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Reminders — تذكيرات AI للمستخدمين
+// ═══════════════════════════════════════════════════════════════════════
+model Reminder {
+  id          String   @id @default(cuid())
+  userEmail   String
+  taskText    String
+  remindAt    DateTime
+  status      String   @default("PENDING") // PENDING | SENT | CANCELLED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([remindAt])
+  @@index([userEmail])
+  @@map("reminders")
+}
+
+/// OAuth 2.0 integrations — "Bring Your Own Account"
+model UserIntegration {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String   // "google" | "notion" | "spotify" | etc.
+  accessToken   String
+  refreshToken  String?
+  expiresAt     DateTime?
+  scope         String?
+  accountId     String?  // Google email, Notion user ID, etc.
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([provider])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ANZARO AI — NEW MERGED MODELS (Smart Ball / Personality / HA)
+// ═══════════════════════════════════════════════════════════════
+
+// Phase 3 — Dynamic Personality Profiling
 model PersonalityProfile {
   id              String   @id @default(cuid())
   userId          String   @unique
-  // The canonical user_personality.md content
-  markdown        String
-  // Structured fields extracted from onboarding
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  markdown        String   // canonical user_personality.md
   name            String
   age             Int?
   occupation      String?
   personaType     String   @default("balanced") // leader | analytical | creative | emotional | balanced
   dialect         String   @default("egyptian")
-  // Adaptive traits 0-100
   leadership      Int      @default(50)
   stubbornness    Int      @default(50)
   analytical      Int      @default(50)
@@ -71,51 +769,46 @@ model PersonalityProfile {
   sociability     Int      @default(50)
   discipline      Int      @default(50)
   humor           Int      @default(50)
-  // Free-form drivers / preferences / triggers
-  driversJson     String   @default("[]") // JSON string array
+  driversJson     String   @default("[]")
   preferencesJson String   @default("[]")
   triggersJson    String   @default("[]")
-  // Evolution tracking (Phase 7.1)
   version         Int      @default(1)
   interactionCount Int     @default(0)
   lastEvolvedAt   DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────── HOME ASSISTANT ────────────────────────
-
+// Phase 6 — Home Assistant Devices (semantic alias engine)
 model Device {
   id            String   @id @default(cuid())
-  // HA-style entity id e.g. media_player.living_room_tv
   entityId      String   @unique
   friendlyName  String
   domain        String   // light | switch | media_player | climate | cover | fan | sensor
   room          String   @default("Living Room")
-  state         String   @default("off") // on | off | playing | idle | ...
-  // attributes JSON (brightness, color_temp, volume, etc.)
+  state         String   @default("off")
   attributesJson String  @default("{}")
-  // Semantic aliases the user defines ("شاشة", "tv", "التلفزيون")
   aliasesJson   String   @default("[]")
   isControllable Boolean @default(true)
   icon          String?
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@index([domain])
   @@index([room])
+  @@index([userId])
 }
 
-// ──────────────────────── MEDIA SESSIONS ────────────────────────
-
+// Phase 2 — Reversed Command Control (media session state)
 model MediaSession {
   id          String   @id @default(cuid())
   userId      String
-  type        String   @default("radio") // radio | music | podcast | video
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   @default("radio")
   title       String
-  source      String   // station name / provider
+  source      String
   streamUrl   String?
   stationId   String?
   status      String   @default("stopped") // playing | paused | stopped
@@ -126,150 +819,89 @@ model MediaSession {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
 }
 
-model RadioStation {
-  id          String   @id @default(cuid())
-  name        String
-  nameAr      String
-  category    String   // quran | nasheed | music | news | talk
-  city        String?
-  country     String?
-  streamUrl   String
-  logoUrl     String?
-  description String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
-  @@index([category])
-}
-
-// ─────────────────── MOOD SCENES (Phase 7.5) ───────────────────
-
+// Phase 7.5 — Mood Scenes (compound multi-device states)
 model MoodScene {
   id            String   @id @default(cuid())
   name          String
   nameAr        String
   description   String
-  triggerPhrase String   // "I need to focus" -> handled via LLM intent
+  triggerPhrase String
   icon          String   @default("Sparkles")
   color         String   @default("violet")
-  // compound actions JSON: [{entityId, action, params}]
   actionsJson   String   @default("[]")
   createdAt     DateTime @default(now())
 }
 
-// ─────────────── QUICK ACTIONS (Phase 7.6 / UI sync) ───────────────
-
+// Phase 7.6 — Quick Actions (AI-pinned UI syncing)
 model QuickAction {
   id         String   @id @default(cuid())
   userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   label      String
   labelAr    String?
   icon       String   @default("Zap")
-  command    String   // natural language command
-  actionType String   @default("natural") // natural | device | scene | media
-  targetId   String?  // deviceId / sceneId / stationId
+  command    String
+  actionType String   @default("natural")
+  targetId   String?
   useCount   Int      @default(0)
   isPinned   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+// Phase 6.3 — Intelligent Automation Routines
+model Routine {
+  id            String   @id @default(cuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  nameAr        String
+  description   String
+  triggerJson   String   @default("{}")
+  actionsJson   String   @default("[]")
+  learnedFrom   String?
+  confidence    Int      @default(50)
+  isEnabled     Boolean  @default(true)
+  createdAt     DateTime @default(now())
 
   @@index([userId])
 }
 
-// ─────────────────── MCP TOOLS (Phase 1) ───────────────────
+// Phase 7.2 — Proactive Nudges (smart companion)
+model ProactiveNudge {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message      String
+  messageAr    String?
+  triggerType  String   @default("suggestion")
+  severity     String   @default("info")
+  relatedEntity String?
+  scheduledFor DateTime?
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
 
+  @@index([userId])
+}
+
+// Smart Ball MCP Tool registry (local-first tools for the orb)
 model McpTool {
   id            String   @id @default(cuid())
   name          String   @unique
   description   String
   category      String   // search | media | home | data | utility
-  endpoint      String?  // url or internal route
+  endpoint      String?
   inputSchemaJson String @default("{}")
   outputType    String   @default("text")
   isEnabled     Boolean  @default(true)
-  isLocal       Boolean  @default(true) // local-first execution
+  isLocal       Boolean  @default(true)
   latencyMs     Int      @default(0)
   createdAt     DateTime @default(now())
 
   @@index([category])
-}
-
-// ─────────────── ROUTINES (Phase 6.3 automation) ───────────────
-
-model Routine {
-  id            String   @id @default(cuid())
-  userId        String?
-  name          String
-  nameAr        String
-  description   String
-  triggerJson   String   @default("{}") // {type: schedule|pattern, ...}
-  actionsJson   String   @default("[]")
-  learnedFrom   String?  // "manual_pattern" | "ai_suggested"
-  confidence    Int      @default(50) // 0-100
-  isEnabled     Boolean  @default(true)
-  createdAt     DateTime @default(now())
-
-  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-// ─────────────── PROACTIVE NUDGES (Phase 7.2) ───────────────
-
-model ProactiveNudge {
-  id           String   @id @default(cuid())
-  userId       String
-  message      String
-  messageAr    String?
-  triggerType  String   // deadline | routine_broken | streak | suggestion
-  severity     String   @default("info") // info | gentle | urgent
-  relatedEntity String?
-  scheduledFor DateTime?
-  status       String   @default("pending") // pending | shown | dismissed | actioned
-  createdAt    DateTime @default(now())
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-// ─────────────────────── CHAT ───────────────────────
-
-model Conversation {
-  id        String    @id @default(cuid())
-  userId    String
-  title     String    @default("New Conversation")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  Message[]
-
-  @@index([userId])
-}
-
-model Message {
-  id             String   @id @default(cuid())
-  conversationId String
-  userId         String?
-  role           String   // user | assistant | system | tool
-  content        String
-  // tool calls / tool results JSON
-  toolCallsJson  String   @default("[]")
-  intent         String?  // chat | media_play | media_stop | device_control | scene | mcp
-  emotion        String?
-  createdAt      DateTime @default(now())
-
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@index([conversationId])
-  @@index([userId])
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from '@/lib/smart-ball-store'
 import { cn } from '@/lib/utils'
 
 interface SmartBallProps {
@@ -56,7 +56,7 @@ const STATUS_CONFIG = {
 } as const
 
 export function SmartBall({ size = 120, className, showLabel = true }: SmartBallProps) {
-  const ball = useAppStore((s) => s.ball)
+  const ball = useSmartBallStore((s) => s.ball)
   const config = STATUS_CONFIG[ball.status] ?? STATUS_CONFIG.idle
   const hue = ball.hue
 

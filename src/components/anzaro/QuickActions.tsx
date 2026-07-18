@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { toast } from 'sonner'
 import { Zap, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'

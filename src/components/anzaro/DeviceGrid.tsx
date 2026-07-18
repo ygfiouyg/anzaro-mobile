@@ -1,6 +1,6 @@
 'use client'
 
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Input } from '@/components/ui/input'
@@ -17,7 +17,7 @@ const ICONS: Record<string, any> = {
 }
 
 export function DeviceGrid() {
-  const { devices, setDevices, updateDevice } = useAppStore()
+  const { devices, setDevices, updateDevice } = useSmartBallStore()
   const [filter, setFilter] = useState('')
   const [aliasFor, setAliasFor] = useState<string | null>(null)
   const [aliasText, setAliasText] = useState('')

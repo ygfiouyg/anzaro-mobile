@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -10,7 +10,7 @@ import {
   User as UserIcon, FileText, Activity, Palette, Globe, LogOut,
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, TrendingUp,
 } from 'lucide-react'
-import { THEME_PRESETS } from '@/lib/types'
+import { THEME_PRESETS } from '@/lib/anzaro-types'
 
 interface HealthData {
   healthScore: Record<string, number>
@@ -31,7 +31,7 @@ const TRAIT_LABELS: Record<string, { ar: string }> = {
 }
 
 export function SettingsPanel() {
-  const { user, profile, setHue, reset } = useAppStore()
+  const { user, profile, setHue, reset } = useSmartBallStore()
   const [health, setHealth] = useState<HealthData | null>(null)
   const [tab, setTab] = useState<'profile' | 'theme' | 'health'>('profile')
 

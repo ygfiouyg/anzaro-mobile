@@ -6,6 +6,10 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+// ═══════════════════════════════════════════════════════════════════════
+// PREMIUM SHEET — "Apple/Stripe" aesthetic
+// ═══════════════════════════════════════════════════════════════════════
+
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
 }
@@ -36,7 +40,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[100] bg-black/60 backdrop-blur-md",
         className
       )}
       {...props}
@@ -58,7 +62,13 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+          // ── PREMIUM BASE ──
+          "bg-background bg-gradient-to-br from-background via-background to-muted/30",
+          // ── GLOWING BORDER & DEPTH ──
+          "border-border/60 dark:border-white/10",
+          "shadow-2xl shadow-blue-900/20 dark:shadow-blue-950/40",
+          // ── ANIMATION ──
+          "data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-[100] flex flex-col gap-4 transition ease-[cubic-bezier(0.32,0.72,0,1)] data-[state=closed]:duration-300 data-[state=open]:duration-500",
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
           side === "left" &&
@@ -72,7 +82,7 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">
+        <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 flex size-8 items-center justify-center rounded-full bg-black/[0.04] opacity-80 backdrop-blur-sm transition-all duration-200 hover:scale-105 hover:bg-black/[0.08] hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden dark:bg-white/[0.06] dark:hover:bg-white/[0.12]">
           <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
@@ -108,7 +118,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-foreground font-semibold", className)}
+      className={cn("text-foreground font-bold tracking-tight", className)}
       {...props}
     />
   )
@@ -121,7 +131,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-muted-foreground text-sm leading-relaxed", className)}
       {...props}
     />
   )

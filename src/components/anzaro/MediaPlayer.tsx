@@ -1,6 +1,6 @@
 'use client'
 
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { toast } from 'sonner'
@@ -18,7 +18,7 @@ interface Station {
 }
 
 export function MediaPlayer() {
-  const { mediaSession, setMediaSession } = useAppStore()
+  const { mediaSession, setMediaSession } = useSmartBallStore()
   const [stations, setStations] = useState<Station[]>([])
   const [loading, setLoading] = useState(false)
 

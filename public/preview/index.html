@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anzaro AI — معاينة التصميم الجديد بأسلوب iOS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Cairo', system-ui, sans-serif;
+    background: linear-gradient(135deg, #f2f2f7 0%, #e5e5ea 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+    color: #1c1c1e;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    text-align: center;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #007AFF, #5856D6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8e8e93;
+    font-size: 17px;
+    margin-bottom: 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  .card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .card:hover { transform: translateY(-4px); }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #1c1c1e;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-dark { background: #1c1c1e; color: #fff; }
+  .badge-light { background: #f2f2f7; color: #1c1c1e; }
+  .badge-boot { background: #007AFF; color: #fff; }
+  .card img {
+    width: 100%;
+    border-radius: 14px;
+    display: block;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .note {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 24px;
+    border-right: 4px solid #007AFF;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+  }
+  .note h2 {
+    font-size: 19px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: #1c1c1e;
+  }
+  .note p {
+    color: #3c3c43;
+    line-height: 1.6;
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+  .note ul {
+    margin: 12px 0;
+    padding-right: 20px;
+    color: #3c3c43;
+  }
+  .note li {
+    margin-bottom: 6px;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  .arrow {
+    text-align: center;
+    font-size: 48px;
+    color: #007AFF;
+    margin: 20px 0;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Anzaro AI — التصميم الجديد بأسلوب iOS</h1>
+    <p class="subtitle">التصاميم دي موجودة في الـ Preview Panel على اليمين، مش على HuggingFace</p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">
+          <span class="badge badge-boot">1</span>
+          شاشة التحميل (iOS Boot)
+        </div>
+        <img src="/preview/boot.png" alt="iOS Boot Screen" />
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span class="badge badge-dark">2</span>
+          الوضع الداكن (True Black OLED)
+        </div>
+        <img src="/preview/auth-dark.png" alt="Dark Mode" />
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span class="badge badge-light">3</span>
+          الوضع الفاتح (iOS Grouped)
+        </div>
+        <img src="/preview/auth-light.png" alt="Light Mode" />
+      </div>
+    </div>
+
+    <div class="note">
+      <h2>⚠️ ملاحظة مهمة</h2>
+      <p>أنت بتفوت صفحة HuggingFace Space القديمة (<code>kopabdo/DELTA_AI_V2</code>) — دي النسخة اللي على HuggingFace ومش متحدثة بالتعديلات الجديدة.</p>
+      <p><strong>التصميم الجديد بأسلوب iOS موجود في المشروع المحلي</strong>، وتقدر تشوفه عبر:</p>
+      <ul>
+        <li>الـ <strong>Preview Panel</strong> على اليمين في الواجهة</li>
+        <li>أو زرار <strong>"Open in New Tab"</strong> فوق الـ Preview Panel</li>
+      </ul>
+      <p>التعديلات اللي اتعملت:</p>
+      <ul>
+        <li>✅ إعادة تسميةDELTA_AI</strong> → <strong>Anzaro AI</strong></li>
+        <li>✅ وضع فاتح + وضع داكن حقيقي (مش زي بعض زي ما كان)</li>
+        <li>✅ تصميم iOS كامل: iMessage bubbles, iOS Blue, SF Pro font</li>
+        <li>✅ شاشة تحميل بأسلوب iPhone boot</li>
+        <li>✅ Theme Toggle بأسلوب iOS Segmented Control</li>
+        <li>✅ Header بأسلوب iOS Navigation Bar مع backdrop-blur</li>
+      </ul>
+    </div>
+
+    <div class="arrow">←</div>
+    <p style="text-align:center; color:#8e8e93; font-size:15px;">
+      بص على الـ Preview Panel على اليمين عشان تشوف التصميم الحقيقي
+    </p>
+  </div>
+</body>
+</html>

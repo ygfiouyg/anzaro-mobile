@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import {
   Sparkles, Brain, Clapperboard, Video, Moon, Briefcase, Play, Loader2,
 } from 'lucide-react'
@@ -34,7 +34,7 @@ interface Scene {
 export function ScenePanel() {
   const [scenes, setScenes] = useState<Scene[]>([])
   const [executing, setExecuting] = useState<string | null>(null)
-  const refreshDevices = useAppStore((s) => s.setDevices)
+  const refreshDevices = useSmartBallStore((s) => s.setDevices)
 
   useEffect(() => {
     fetch('/api/scenes')

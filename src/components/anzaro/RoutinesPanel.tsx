@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useAppStore } from '@/lib/store'
+import { useSmartBallStore } from "@/lib/smart-ball-store"
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
@@ -21,7 +21,7 @@ interface Routine {
 }
 
 export function RoutinesPanel() {
-  const user = useAppStore((s) => s.user)
+  const user = useSmartBallStore((s) => s.user)
   const [routines, setRoutines] = useState<Routine[]>([])
   const [suggesting, setSuggesting] = useState(false)
 
