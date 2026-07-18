@@ -15,40 +15,59 @@ import { RoutinesPanel } from './RoutinesPanel';
 import { McpToolsPanel } from './McpToolsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { WeatherPrayerWidget } from './WeatherPrayerWidget';
+import { CalendarTasksWidget } from './CalendarTasksWidget';
+import { SmartBallSuggestions } from './SmartBallSuggestions';
+import { KeysDashboard } from './KeysDashboard';
+import { ModelProviderDashboard } from './ModelProviderDashboard';
+import { SmartBallHistory } from './SmartBallHistory';
+import { useVoiceOutput } from '@/hooks/use-voice-output';
+import { useAuthStore } from '@/store/auth-store';
 import {
   LayoutGrid, Clapperboard, Calendar, Wrench, Settings as SettingsIcon,
-  X, CloudSun,
+  X, CloudSun, CheckSquare, Volume2, Square, Key, Cpu, Clock,
 } from 'lucide-react';
 
-type BallTab = 'devices' | 'scenes' | 'routines' | 'tools' | 'profile';
+type BallTab = 'devices' | 'scenes' | 'routines' | 'calendar' | 'tools' | 'keys' | 'models' | 'history' | 'profile';
 
 const TABS: { id: BallTab; label: string; icon: any }[] = [
   { id: 'devices', label: 'الأجهزة', icon: LayoutGrid },
   { id: 'scenes', label: 'المشاهد', icon: Clapperboard },
   { id: 'routines', label: 'الروتينات', icon: Calendar },
+  { id: 'calendar', label: 'التقويم', icon: CheckSquare },
   { id: 'tools', label: 'الأدوات', icon: Wrench },
+  { id: 'keys', label: 'المفاتيح', icon: Key },
+  { id: 'models', label: 'النماذج', icon: Cpu },
+  { id: 'history', label: 'السجل', icon: Clock },
   { id: 'profile', label: 'الشخصية', icon: SettingsIcon },
 ];
 
 export function SmartBallOverlay() {
   const { ball, setBall, setPanelOpen } = useSmartBallStore();
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const token = useAuthStore((s) => s.token);
+  const { speaking, speak, stop } = useVoiceOutput();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<BallTab>('devices');
   const [showWeather, setShowWeather] = useState(false);
 
-  // Sync ball state with chat streaming
+  // Sync ball state with chat streaming + auto-speak last response
   useEffect(() => {
     if (isStreaming && ball.status === 'idle') {
       setBall({ status: 'processing', label: 'Processing', labelAr: 'بفكّر' });
     } else if (!isStreaming && ball.status === 'processing') {
       setBall({ status: 'speaking', label: 'Speaking', labelAr: 'بتكلم' });
+      // Auto-speak the last assistant message
+      const messages = useChatStore.getState().messages;
+      const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content);
+      if (lastAssistant?.content) {
+        speak(lastAssistant.content, token || undefined);
+      }
       const t = setTimeout(() => {
         setBall({ status: 'idle', label: 'Idle', labelAr: 'في انتظارك' });
-      }, 1500);
+      }, 2000);
       return () => clearTimeout(t);
     }
-  }, [isStreaming, ball.status, setBall]);
+  }, [isStreaming, ball.status, setBall, speak, token]);
 
   function handleOpenChange(v: boolean) {
     setOpen(v);
@@ -125,6 +144,31 @@ export function SmartBallOverlay() {
         <CloudSun className="w-4 h-4 text-amber-400" />
       </motion.button>
 
+      {/* Voice output toggle — speak last response */}
+      <motion.button
+        onClick={() => {
+          if (speaking) {
+            stop()
+          } else {
+            const messages = useChatStore.getState().messages
+            const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content)
+            if (lastAssistant?.content) speak(lastAssistant.content, token || undefined)
+          }
+        }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: 0.7, type: 'spring', stiffness: 200, damping: 20 }}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.92 }}
+        className={`fixed bottom-72 left-4 z-50 w-10 h-10 rounded-full flex items-center justify-center group transition-all ${
+          speaking ? 'bg-primary text-primary-foreground glow-primary animate-pulse' : 'glass'
+        }`}
+        title={speaking ? 'إيقاف الصوت' : 'نطق آخر رد'}
+        aria-label="النطق"
+      >
+        {speaking ? <Square className="w-3.5 h-3.5" /> : <Volume2 className="w-4 h-4 text-violet-400" />}
+      </motion.button>
+
       <AnimatePresence>
         {showWeather && (
           <motion.div
@@ -157,6 +201,9 @@ export function SmartBallOverlay() {
             </button>
           </SheetHeader>
 
+          {/* AI-generated suggestions based on usage + personality + time */}
+          <SmartBallSuggestions onFire={fireCommand} />
+
           <div className="px-3 py-2 border-b border-border/40">
             <QuickActions onFire={fireCommand} />
           </div>
@@ -182,7 +229,11 @@ export function SmartBallOverlay() {
             {tab === 'devices' && <DeviceGrid />}
             {tab === 'scenes' && <ScenePanel />}
             {tab === 'routines' && <RoutinesPanel />}
+            {tab === 'calendar' && <CalendarTasksWidget />}
             {tab === 'tools' && <McpToolsPanel />}
+            {tab === 'keys' && <KeysDashboard />}
+            {tab === 'models' && <ModelProviderDashboard />}
+            {tab === 'history' && <SmartBallHistory />}
             {tab === 'profile' && <SettingsPanel />}
           </div>
         </SheetContent>
