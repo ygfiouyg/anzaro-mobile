@@ -23,6 +23,7 @@ import { QuizGenerator } from './QuizGenerator';
 import { ImageGenDialog } from './ImageGenDialog';
 import { VideoGenDialog } from './VideoGenDialog';
 import { ImageSearchDialog } from './ImageSearchDialog';
+import { SmartBallOverlay } from '@/components/anzaro/SmartBallOverlay';
 import {
   Sheet,
   SheetContent,
@@ -58,6 +59,23 @@ export function ChatApp({ onSwitchToPdfCreator }: ChatAppProps = {}) {
     window.addEventListener('delta-ai-image-gen', handler);
     return () => window.removeEventListener('delta-ai-image-gen', handler);
   }, []);
+
+  // ── Smart Ball quick-action bridge ──
+  // When the Smart Ball overlay dispatches a quick-command, forward it to the real chat.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string;
+      if (detail && typeof detail === 'string' && detail.trim()) {
+        try {
+          sendMessage(detail.trim());
+        } catch {
+          // store may not be ready
+        }
+      }
+    };
+    window.addEventListener('anzaro-quick-send', handler);
+    return () => window.removeEventListener('anzaro-quick-send', handler);
+  }, [sendMessage]);
 
   // /فيديو → open VideoGenDialog
   useEffect(() => {
@@ -776,6 +794,9 @@ export function ChatApp({ onSwitchToPdfCreator }: ChatAppProps = {}) {
           </SheetContent>
         </Sheet>
       )}
+
+      {/* Smart Ball floating overlay — orb + control panel (devices/scenes/routines) */}
+      <SmartBallOverlay />
 
       {/* iOS-style clean — no extra CSS animations needed */}
     </div>

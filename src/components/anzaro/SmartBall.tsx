@@ -73,7 +73,7 @@ export function SmartBall({ size = 120, className, showLabel = true }: SmartBall
             className="ball-ripple"
             style={{
               animationDelay: `${i * 0.6}s`,
-              borderColor: `oklch(0.7 0.24 ${hue} / 45%)`,
+              borderColor: `hsl(var(--primary) / 45%)`,
             }}
           />
         ))}
@@ -82,7 +82,7 @@ export function SmartBall({ size = 120, className, showLabel = true }: SmartBall
         <div
           className="absolute inset-0 rounded-full blur-2xl"
           style={{
-            background: `radial-gradient(circle, oklch(0.7 0.24 ${hue} / ${config.glow}), transparent 70%)`,
+            background: `radial-gradient(circle, hsl(var(--primary) / ${config.glow}), transparent 70%)`,
             transform: 'scale(1.4)',
           }}
         />
@@ -94,13 +94,13 @@ export function SmartBall({ size = 120, className, showLabel = true }: SmartBall
             width: size,
             height: size,
             background: `
-              radial-gradient(circle at 32% 28%, oklch(0.92 0.06 ${hue} / 95%), oklch(0.72 0.22 ${hue}) 35%, oklch(0.52 0.2 ${hue}) 70%, oklch(0.38 0.16 ${hue}) 100%)
+              radial-gradient(circle at 32% 28%, hsl(0 0% 100% / 30%), hsl(var(--primary)) 35%, hsl(var(--primary) / 0.7) 70%, hsl(var(--primary) / 0.5) 100%)
             `,
             boxShadow: `
-              inset 0 2px 8px oklch(1 0 0 / 40%),
-              inset 0 -8px 24px oklch(0 0 0 / 40%),
-              0 0 40px -4px oklch(0.7 0.24 ${hue} / ${config.glow}),
-              0 8px 32px -8px oklch(0.6 0.2 ${hue} / 60%)
+              inset 0 2px 8px hsl(0 0% 100% / 40%),
+              inset 0 -8px 24px hsl(0 0% 0% / 40%),
+              0 0 40px -4px hsl(var(--primary) / ${config.glow}),
+              0 8px 32px -8px hsl(var(--primary) / 60%)
             `,
           }}
           animate={{ scale: ball.status === 'executing' ? [1, 1.05, 1] : 1 }}

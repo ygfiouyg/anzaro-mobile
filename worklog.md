@@ -292,3 +292,68 @@ The user clarified that the REAL Anzaro AI codebase lives on HuggingFace Space (
 ---
 
 *Last updated: 2025-01-30 (Round 3 — Full Integration & Merge) · Real Anzaro AI codebase is now the base, all Smart Ball features merged in*
+
+---
+
+## Round 4 — Smart Ball Wiring into Real ChatApp (2025-01-30)
+
+### Assessment
+Round 3 merged the real Anzaro AI codebase with new Smart Ball features under isolated namespaces. The next-phase recommendations were: (1) wire the Smart Ball orb into the real ChatApp, (2) bridge the intent router, (3) load PersonalityProfile in chat stream. This round tackled #1 — the visual integration.
+
+### What Was Done
+
+1. **Created `SmartBallOverlay.tsx`** — a floating overlay component that mounts inside the real `ChatApp.tsx`:
+   - **Floating orb button** (bottom-left, z-50): animated radial-gradient sphere with pulsing glow, status dot (amber=processing, emerald=executing, blue=listening), and hover tooltip showing the current ball state in Arabic.
+   - **Weather quick-toggle button** (above the orb): opens a popover with the WeatherPrayerWidget.
+   - **Control panel Sheet** (left side, 380px): tabbed interface with 5 tabs (Devices, Scenes, Routines, Tools, Profile) + Quick Actions bar.
+   - The orb **reacts to chat streaming state** automatically — when `useChatStore.isStreaming` becomes true, the orb transitions to "processing"; when streaming ends, it briefly shows "speaking" then returns to "idle".
+
+2. **Wired the overlay into `ChatApp.tsx`**:
+   - Added `import { SmartBallOverlay } from '@/components/anzaro/SmartBallOverlay'`
+   - Mounted `<SmartBallOverlay />` before the closing div
+   - Added a **quick-action event bridge**: listens for `anzaro-quick-send` CustomEvents and forwards them to the real `sendMessage()` from the chat-store, so Smart Ball quick-actions send messages through the real chat pipeline.
+
+3. **Merged Smart Ball styles into the real `globals.css`**:
+   - Added glassmorphism utilities (`.glass`, `.glass-strong`) using `hsl(var(--card))` to match the existing "Clean Slate" theme.
+   - Added orb glow (`.glow-primary`, `.glow-soft`), aurora background, thin scrollbar, and all ball state animations (breathe, listen, spin, execute, ripple, shimmer, pulse-dot).
+   - All styles use `hsl()` (not `oklch()`) to match the real design system.
+
+4. **Updated `SmartBall.tsx`** to use `hsl(var(--primary))` instead of `oklch()` for all orb colors, gradients, and shadows — ensuring full consistency with the real theme.
+
+5. **Fixed the scenes API** — the `RadioStation` seed was using non-existent fields (`nameAr`, `city`, `country`, `description`, `logoUrl`). Updated to use the real model's fields (`name`, `streamUrl`, `logo`, `category`, `sortOrder`).
+
+### Verification Results
+```
+1. Home page → HTTP 200, title "Anzaro AI — ذكاء اصطناعي عربي" ✅
+2. Login API → token returned ✅
+3. Chat UI renders after token injection → "صباح الخير, Test" + suggestions ✅
+4. Smart Ball orb in DOM → aria-label="الكرة الذكية" found ✅
+5. Orb label visible in page text → "في انتظارك" (idle state) ✅
+6. Control panel opens on click → "الكرة الذكية" + "Smart Ball Control" heading ✅
+7. 5 tabs visible → الأجهزة, المشاهد, الروتينات, الأدوات, الشخصية ✅
+8. Quick actions bar → "سريع" visible ✅
+9. Lint → 0 errors, 10 warnings (all pre-existing) ✅
+```
+
+### Architecture
+- The Smart Ball orb is now a **floating overlay** that coexists with the real Anzaro chat UI — no existing code was modified except adding the import + mount + event bridge in ChatApp.tsx.
+- The orb's state syncs with the real `useChatStore.isStreaming` — it animates automatically when the user sends a message.
+- The control panel Sheet opens from the left (RTL) and contains all Smart Ball management features (devices, scenes, routines, MCP tools, personality profile).
+- Quick-action buttons in the panel dispatch commands through the real chat pipeline via the event bridge.
+
+### Files Modified
+- `src/components/chat/ChatApp.tsx` — added SmartBallOverlay import + mount + quick-action event bridge
+- `src/app/globals.css` — added 139 lines of Smart Ball styles (glass, glow, animations)
+- `src/components/anzaro/SmartBall.tsx` — converted oklch() → hsl(var(--primary))
+- `src/components/anzaro/SmartBallOverlay.tsx` — new floating overlay component
+- `src/lib/anzaro-seed.ts` — fixed RadioStation fields to match real model
+
+### Unresolved Issues / Next-Phase Recommendations
+1. **Bridge intent router to control engine**: Chat messages like "شغّل قرآن" or "اقفل النور" should trigger the Smart Ball control engine directly from the chat stream (currently only works via the `/api/anzaro/chat` route, not the main `/api/chat/stream`).
+2. **Load PersonalityProfile in chat stream**: Inject the `user_personality.md` system prompt into the real `chat/stream/route.ts` (3789 lines) so the AI adapts its tone based on the user's personality.
+3. **Device/scenes data loading**: The DeviceGrid shows "0 جهاز" because the anzaro API routes require Bearer auth — need to pass the chat-store token to the Smart Ball API calls.
+4. **SSE streaming for Smart Ball commands**: When a device/scene action executes, show a brief confirmation in the chat message stream.
+
+---
+
+*Last updated: 2025-01-30 (Round 4) · Smart Ball orb + control panel wired into real Anzaro AI ChatApp · Verified via agent-browser*
