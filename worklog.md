@@ -744,3 +744,73 @@ User authenticates → page.tsx checks /api/anzaro/personality/profile
 ---
 
 *Last updated: 2025-01-30 (Round 16) · OAuth callback loop fixed + OnboardingQuiz integrated*
+
+---
+
+## Round 17 — Phase 4.1: Dashboard + HASS Control Panel + Matrix Adaptation (2025-01-30)
+
+### What Was Done
+
+1. **HASS API Client** (`src/lib/hass-client.ts`):
+   - `fetchHassEntities()` — fetches all controllable devices from HASS via `/api/states`
+   - `toggleHassEntity()` — turn_on/turn_off/toggle via `/api/services/{domain}/{service}`
+   - `setHassState()` — set brightness, temperature, RGB color, etc.
+   - `getHassConfig()` — reads `HASS_URL` + `HASS_TOKEN` env vars
+   - **Mock mode**: returns 8 mock devices when HASS not configured (cloud-only deploy)
+   - V.14: All calls guarded with optional chaining + try/catch + `AbortSignal.timeout(5000)`
+
+2. **Dynamic Matrix Adaptation** (`getMatrixEnvironmentSuggestions()`):
+   - High stress (>60) → warm dim lights (30% brightness, 3000K) + cool AC (23°C, low fan)
+   - Analytical profile → bright cool office lights (100%, 5000K)
+   - Creative profile → warm ambient RGB (255,180,100)
+   - Leader profile (ambition+leadership >75) → DND on + office lights at 100%
+   - High dark triad (Machiavellianism >70) → grounding cool blue (100,150,255)
+   - Returns priority (high/medium/low) + Arabic reason + service data
+
+3. **HASS API Route** (`/api/anzaro/hass`):
+   - GET: fetch entities + config status (never exposes token to client)
+   - POST: toggle/set_state/get_suggestions
+
+4. **HassWidget Component** (`src/components/dashboard/HassWidget.tsx`):
+   - Grid layout with domain-grouped devices (light/switch/climate/sensor)
+   - Toggle switches with optimistic updates + revert on error
+   - **Matrix suggestion panel**: shows AI-recommended environment changes with "تطبيق" buttons
+   - Domain-specific icons + colors (light=amber, switch=blue, climate=cyan, sensor=emerald)
+   - Brightness bars for lights, temperature display for climate
+   - Sensor read-only cards with values + units
+   - Loading shimmer + refresh button
+   - HASS config status indicator (connected vs mock mode)
+
+5. **Dashboard Page** (`src/app/dashboard/page.tsx`):
+   - Modular grid: Profile Overview bar + Chat + Smart Home Hub (380px right panel)
+   - Onboarding blocker: if `identityMatrix` is null → shows `<OnboardingFlow />`
+   - Profile stats bar: persona type + leadership + analytical + discipline + interactions
+   - Passes matrix traits to HassWidget for dynamic adaptation
+   - V.14: Strict guards (`isAuthenticated`, `needsOnboarding`, `profile` null checks)
+
+### Verification Results (Live HF Space)
+```
+1. Space status → RUNNING ✅
+2. HASS API → 8 devices returned (mock mode) ✅
+3. First device: light.living_room ✅
+4. HASS configured: False (mock mode — HASS_URL/TOKEN not set) ✅
+5. Lint → 0 errors, 11 warnings (pre-existing) ✅
+```
+
+### Files Created
+- `src/lib/hass-client.ts` — HASS API client + mock mode + matrix adaptation
+- `src/app/api/anzaro/hass/route.ts` — HASS proxy API
+- `src/components/dashboard/HassWidget.tsx` — Smart Home Hub widget
+- `src/app/dashboard/page.tsx` — Dashboard layout with onboarding blocker
+
+### V.14 Guardrails
+- All HASS calls: `config?.url` + `config?.token` optional chaining ✅
+- `AbortSignal.timeout(5000)` on all HASS fetch calls ✅
+- try/catch on all API operations ✅
+- `Array.isArray()` on entity lists ✅
+- Strict `if (!isAuthenticated)` + `if (needsOnboarding)` guards ✅
+- Lint: 0 errors ✅
+
+---
+
+*Last updated: 2025-01-30 (Round 17) · Phase 4.1 Dashboard + HASS Control Panel + Matrix Adaptation deployed*
