@@ -121,6 +121,15 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
           // Need a userId — find any user with an active session, or use the first user
           const anyUser = await db.user.findFirst({ orderBy: { createdAt: 'asc' } })
           if (anyUser) {
+            // Stream progressively for a more natural feel
+            sink('▶ ')
+            await new Promise((r) => setTimeout(r, 100))
+            sink(`**تم تشغيل ${match.name}**\n\n`)
+            await new Promise((r) => setTimeout(r, 150))
+            sink('الراديو بيذيع دلوقتي. 🎵\n')
+            await new Promise((r) => setTimeout(r, 100))
+            sink(`قول "اقفل الراديو" عشان توقفه.`)
+            // Execute the actual media session start
             await startMediaSession({
               userId: anyUser.id,
               title: match.name,
@@ -129,7 +138,6 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
               stationId: match.id,
               type: 'radio',
             })
-            sink(`▶ **تم تشغيل ${match.name}**\n\nالراديو بيذيع دلوقتي. 🎵\nقول "اقفل الراديو" عشان توقفه.`)
           } else {
             sink('مقدرش أشغّل — لازم تسجل دخول الأول.')
           }

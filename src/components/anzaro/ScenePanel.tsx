@@ -2,11 +2,12 @@
 
 import { authFetch } from '@/lib/auth-fetch'
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useSmartBallStore } from "@/lib/smart-ball-store"
 import {
-  Sparkles, Brain, Clapperboard, Video, Moon, Briefcase, Play, Loader2,
+  Sparkles, Brain, Clapperboard, Video, Moon, Briefcase, Play, Loader2, Zap,
 } from 'lucide-react'
 
 const ICONS: Record<string, any> = {
@@ -79,17 +80,22 @@ export function ScenePanel() {
         <p className="text-[10px] text-muted-foreground mt-0.5">جملة وحدة تظبط كل الأجهزة</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2.5">
-        {scenes.map((s) => {
+      <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-3">
+        {scenes.map((s, i) => {
           const Icon = ICONS[s.icon] || Sparkles
           const colorClass = COLOR_MAP[s.color] || COLOR_MAP.violet
           const actions = (() => { try { return JSON.parse(s.actionsJson) } catch { return [] } })()
           return (
-            <div
+            <motion.div
               key={s.id}
-              className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${colorClass} p-4 transition-all hover:scale-[1.02]`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${colorClass} p-4 transition-all hover:scale-[1.02] smart-ball-card`}
             >
-              <div className="flex items-start gap-3">
+              {/* Decorative gradient orb */}
+              <div className="absolute -top-8 -left-8 w-24 h-24 rounded-full bg-white/5 blur-2xl pointer-events-none" />
+              <div className="flex items-start gap-3 relative">
                 <div className="w-10 h-10 rounded-xl bg-background/40 backdrop-blur flex items-center justify-center shrink-0">
                   <Icon className="w-5 h-5" />
                 </div>
@@ -97,7 +103,10 @@ export function ScenePanel() {
                   <p className="text-sm font-semibold text-foreground">{s.nameAr}</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{s.description}</p>
                   <div className="flex items-center gap-1 mt-1.5">
-                    <span className="text-[9px] bg-background/40 rounded-full px-1.5 py-0.5">{actions.length} جهاز</span>
+                    <span className="text-[9px] bg-background/40 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
+                      <Zap className="w-2 h-2" />
+                      {actions.length} جهاز
+                    </span>
                     <span className="text-[9px] bg-background/40 rounded-full px-1.5 py-0.5">{s.name}</span>
                   </div>
                 </div>
@@ -106,7 +115,7 @@ export function ScenePanel() {
                 size="sm"
                 onClick={() => execute(s)}
                 disabled={executing === s.id}
-                className="w-full mt-3 h-8 rounded-xl bg-background/60 backdrop-blur hover:bg-background/80 text-foreground"
+                className="w-full mt-3 h-8 rounded-xl bg-background/60 backdrop-blur hover:bg-background/80 text-foreground btn-press"
               >
                 {executing === s.id ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -117,7 +126,7 @@ export function ScenePanel() {
                   </>
                 )}
               </Button>
-            </div>
+            </motion.div>
           )
         })}
       </div>
