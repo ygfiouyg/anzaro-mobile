@@ -939,3 +939,49 @@ User authenticates → page.tsx checks /api/anzaro/personality/profile
 ---
 
 *Last updated: 2025-01-30 (Round 19) · Phase 5.2 Sentient Chat Screen + HASS Action Triggers deployed*
+
+---
+
+## Round 20 — Phase 5.3: Full HASS Control Center Screen (V.14) (2025-01-30)
+
+### What Was Done
+
+**HomeAssistantScreen** (`mobile-app/src/mobile/screens/HomeAssistantScreen.tsx`):
+
+1. **Categorized Scrollable Sections**:
+   - الإنارة (Lights) — amber glow when active, brightness slider mock bar
+   - المفاتيح (Switches) — blue when active
+   - التكييف (Climate) — cyan, temperature + fan mode display
+   - الميديا (Media) — violet
+   - المستشعرات (Sensors) — emerald, read-only with values + units
+
+2. **Dynamic Colors**: per-domain on/off colors (light=amber, switch=blue, climate=cyan, media=violet, cover=teal, fan=orange)
+
+3. **Brightness Controls**: visual progress bar showing brightness % for lights
+
+4. **Optimistic UI + Haptics**:
+   - Every toggle fires `Haptics.selectionAsync()` instantly
+   - Optimistic state update → revert on failure with `Haptics.notificationAsync(Error)`
+   - Success: `Haptics.impactAsync(Light)`
+   - Pull-to-Refresh: `Haptics.impactAsync(Light)` + `RefreshControl`
+
+5. **V.14 Fail-Safe Guardrails**:
+   - `Array.isArray()` on ALL device arrays before `.map()`
+   - Null/undefined devices → Arabic warning: "جاري الاتصال بسيرفر الكورة..."
+   - Error state: "تأكد من إعدادات الربط" with retry button
+   - Empty state: "مفيش أجهزة متصلة" with WifiOff icon
+   - All `device?.entity_id`, `device?.state`, `device?.attributes` use `?.`
+   - Fallback keys: `device?.entity_id ?? Math.random()` prevents key collisions
+   - `LayoutAnimation` for smooth device list transitions
+
+6. **Header**: Cloud Brain status pill (connected/offline) + HASS config badge (HASS/Mock)
+
+7. **Updated App.tsx**: import changed to `./mobile/screens/HomeAssistantScreen`
+
+### Verification
+- Lint: 0 errors ✅
+- Pushed to HF: `9fc779e` ✅
+
+---
+
+*Last updated: 2025-01-30 (Round 20) · Phase 5.3 Full HASS Control Center Screen deployed*
