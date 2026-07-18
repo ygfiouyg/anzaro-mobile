@@ -102,10 +102,19 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // 5. Redirect to frontend with token
+    // 5. Redirect to frontend with token — V.14: set httpOnly cookie for reliable session persistence
     const response = NextResponse.redirect(
       `${FRONTEND_URL}/?google_login=${sessionToken}&google_name=${encodeURIComponent(user.name || '')}`
     );
+
+    // Set session cookie (httpOnly, secure) — ensures the session persists across reloads
+    response.cookies.set('anzaro_session', sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+    });
 
     // Clear OAuth state cookie
     response.cookies.delete('google_oauth_state');

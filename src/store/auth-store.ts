@@ -50,6 +50,8 @@ interface AuthState {
   checkAuth: () => Promise<void>;
   setLanguage: (lang: 'ar' | 'en' | 'egyptian') => void;
   updateUser: (data: Partial<User>) => void;
+  // V.14: Google OAuth session injection — called when ?google_login=TOKEN is in URL
+  setGoogleSession: (token: string, name: string) => Promise<void>;
 }
 
 const initialOtpState: OtpState = {
@@ -306,6 +308,34 @@ export const useAuthStore = create<AuthState>()(
         set((state) => ({
           user: state.user ? { ...state.user, ...data } : null,
         }));
+      },
+
+      // V.14: Google OAuth session injection — set token then verify via /api/auth/me
+      setGoogleSession: async (token: string, name: string) => {
+        // Step 1: Set the token immediately so checkAuth can use it
+        set({ token, isLoading: true });
+        // Step 2: Fetch the full user profile
+        try {
+          const response = await fetch('/api/auth/me', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.rotatedToken) set({ token: data.rotatedToken });
+            set({
+              user: data.user,
+              isAuthenticated: true,
+              isLoading: false,
+              language: (data.user?.language as 'ar' | 'en' | 'egyptian') || 'ar',
+            });
+          } else {
+            // Token invalid — clear and show auth
+            set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+          }
+        } catch {
+          set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+        }
       },
     }),
     {

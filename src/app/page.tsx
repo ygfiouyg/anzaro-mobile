@@ -6,106 +6,124 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/auth-store';
 import { ChatApp } from '@/components/chat/ChatApp';
 import { PdfCreatorApp } from '@/components/pdf/PdfCreatorApp';
-import AuthPage from '@/components/auth/AuthPage';
+import { AuthScreen } from '@/components/anzaro/AuthScreen';
+import { OnboardingFlow } from '@/components/anzaro/OnboardingFlow';
 import { SessionProvider } from '@/components/providers/SessionProvider';
+import { authFetch } from '@/lib/auth-fetch';
 
 type AppView = 'chat' | 'pdf-creator';
 
 export default function DeltaAIApp() {
-  const { isAuthenticated, checkAuth } = useAuthStore();
+  const { isAuthenticated, checkAuth, setGoogleSession } = useAuthStore();
   const [appView, setAppView] = useState<AppView>('chat');
   const [initializing, setInitializing] = useState(true);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
-  // Check auth on mount — with timeout fallback to prevent stuck loading
+  // Check auth on mount — handle Google OAuth redirect + normal auth
   useEffect(() => {
     const init = async () => {
       try {
-        // Race checkAuth against a 3s timeout — if API is slow/unreachable, proceed anyway
-        await Promise.race([
-          checkAuth(),
-          new Promise((resolve) => setTimeout(resolve, 3000)),
-        ]);
+        // V.14: Check for Google OAuth redirect (?google_login=TOKEN in URL)
+        const urlParams = new URLSearchParams(window.location.search);
+        const googleToken = urlParams.get('google_login');
+        const googleName = urlParams.get('google_name') || '';
+
+        if (googleToken) {
+          // Google OAuth redirect detected — inject session token into store
+          console.log('[Auth] Google OAuth redirect detected, injecting session...');
+          await setGoogleSession(googleToken, googleName);
+          // Clean the URL (remove query params) without reload
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+          // Normal auth check — read from persisted store
+          await Promise.race([
+            checkAuth(),
+            new Promise((resolve) => setTimeout(resolve, 3000)),
+          ]);
+        }
       } catch (e) {
-        // Ignore auth errors — proceed to show auth page
         console.warn('Auth check failed:', e);
       } finally {
         setInitializing(false);
       }
     };
     init();
-  }, [checkAuth]);
+  }, [checkAuth, setGoogleSession]);
 
-  // Loading screen — minimal, fast, respects theme
+  // V.101: Check if user needs Identity Matrix onboarding
+  useEffect(() => {
+    if (!isAuthenticated || initializing) return;
+
+    const checkOnboarding = async () => {
+      try {
+        // Check if the user has a PersonalityProfile (Identity Matrix)
+        const res = await authFetch('/api/anzaro/personality/profile');
+        if (res.ok) {
+          const data = await res.json();
+          // If no profile exists, show the onboarding wizard
+          if (!data.profile) {
+            console.log('[Auth] No Identity Matrix found — showing OnboardingQuiz');
+            setNeedsOnboarding(true);
+          } else {
+            setNeedsOnboarding(false);
+          }
+        } else {
+          // If the API fails, don't block the user
+          setNeedsOnboarding(false);
+        }
+      } catch {
+        setNeedsOnboarding(false);
+      }
+    };
+    checkOnboarding();
+  }, [isAuthenticated, initializing]);
+
+  // Loading screen — Smart Ball premium design
   if (initializing) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center bg-background"
-        dir="rtl"
-      >
-        <div className="relative flex flex-col items-center gap-8">
-          {/* Logo */}
-          <div className="relative animate-[fadeIn_0.4s_ease-out]">
-            <div className="absolute inset-0 rounded-[22px] blur-2xl bg-muted" />
-            <div
-              className="relative w-[72px] h-[72px] rounded-[22px] flex items-center justify-center"
-              style={{
-                background: "linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)",
-                boxShadow: "0 8px 24px rgb(37 99 235 / 0.3)",
-              }}
-            >
-              <svg viewBox="0 0 32 32" className="w-[36px] h-[36px]" fill="none">
-                <path
-                  d="M16 3L28 16L16 29L4 16L16 3Z"
-                  stroke="#ffffff"
-                  strokeWidth="2.5"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-                <path d="M16 11L21 16L16 21L11 16L16 11Z" fill="#ffffff" />
-              </svg>
-            </div>
+      <div className="min-h-screen flex items-center justify-center bg-aurora bg-grid relative overflow-hidden" dir="rtl">
+        <div className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 rounded-full bg-primary/20 blur-[100px]" />
+        <div className="pointer-events-none absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-primary/10 blur-[100px]" />
+        <div className="relative flex flex-col items-center gap-6 z-10">
+          <div className="relative w-20 h-20 rounded-full animate-ball-breathe"
+            style={{
+              background: 'radial-gradient(circle at 32% 28%, hsl(0 0% 100% / 30%), hsl(var(--primary)) 35%, hsl(var(--primary) / 0.7) 70%, hsl(var(--primary) / 0.5) 100%)',
+              boxShadow: 'inset 0 2px 8px hsl(0 0% 100% / 40%), inset 0 -8px 24px hsl(0 0% 0% / 40%), 0 0 40px -4px hsl(var(--primary) / 0.5)',
+            }}
+          >
+            <div className="absolute rounded-full" style={{ top: '18%', left: '24%', width: '28%', height: '22%', background: 'radial-gradient(ellipse, hsl(0 0% 100% / 70%), transparent 70%)', filter: 'blur(2px)' }} />
           </div>
-
-          {/* Brand */}
-          <div className="flex flex-col items-center gap-1.5 animate-[fadeIn_0.5s_ease-out_0.1s_both]">
-            <h1
-              className="text-[24px] font-semibold tracking-tight text-foreground"
-              style={{ letterSpacing: "-0.03em" }}
-            >
-              Anzaro AI
-            </h1>
-            <p className="text-muted-foreground text-[12px] font-medium tracking-wider">
-              يتم التحميل
-            </p>
+          <div className="flex flex-col items-center gap-1.5">
+            <h1 className="text-2xl font-bold text-gradient">Anzaro AI</h1>
+            <p className="text-muted-foreground text-xs">Anzaro بيستعد...</p>
           </div>
-
-          {/* Progress bar — blue on light gray track, visible in both themes */}
-          <div className="w-[160px] h-[3px] rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{
-                animation: "bootProgress 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards",
-              }}
-            />
+          <div className="w-[140px] h-[2px] rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-primary" style={{ animation: "bootProgress 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards" }} />
           </div>
         </div>
-
-        <style>{`
-          @keyframes bootProgress {
-            0% { width: 0%; }
-            100% { width: 100%; }
-          }
-        `}</style>
+        <style>{`@keyframes bootProgress { 0% { width: 0%; } 100% { width: 100%; } }`}</style>
       </div>
     );
   }
 
-  // Not authenticated → show login page
+  // Not authenticated → show Smart Ball AuthScreen
   if (!isAuthenticated) {
-    return <AuthPage />;
+    return <AuthScreen />;
   }
 
-  // Authenticated → show main app
+  // V.101: Authenticated but no Identity Matrix → block with OnboardingQuiz
+  if (isAuthenticated && needsOnboarding) {
+    return (
+      <OnboardingFlow
+        onComplete={() => {
+          setNeedsOnboarding(false);
+          // Update auth state dynamically — no hard reload
+        }}
+      />
+    );
+  }
+
+  // Authenticated + has Identity Matrix → show main app
   if (appView === 'pdf-creator') {
     return (
       <SessionProvider>
