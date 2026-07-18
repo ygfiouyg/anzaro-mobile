@@ -32,9 +32,15 @@ export function OnboardingFlow() {
   }
 
   function next() {
-    if (!answers[q.id]) {
+    // For scale questions, use a default value of 50 if not explicitly set
+    const currentAnswer = answers[q.id] ?? (q.inputType === 'scale' ? '50' : '')
+    if (!currentAnswer) {
       toast.error('لو سمحت جاوب الأول')
       return
+    }
+    // Persist the (possibly defaulted) answer before advancing
+    if (q.inputType === 'scale' && answers[q.id] === undefined) {
+      setAnswers((a) => ({ ...a, [q.id]: '50' }))
     }
     if (isLast) {
       compile()

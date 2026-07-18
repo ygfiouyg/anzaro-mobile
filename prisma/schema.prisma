@@ -33,6 +33,7 @@ model User {
   routines      Routine[]
   nudges        ProactiveNudge[]
   messages      Message[]
+  sessions      Session[]
 
   @@index([googleId])
 }
@@ -43,6 +44,8 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
