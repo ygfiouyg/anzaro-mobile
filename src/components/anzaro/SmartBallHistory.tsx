@@ -39,13 +39,15 @@ export function SmartBallHistory() {
         // Fetch recent messages from conversations
         const res = await authFetch('/api/anzaro/conversations')
         const data = await res.json()
-        const convs = data.conversations || []
+        const convs = Array.isArray(data.conversations) ? data.conversations : []
         if (convs.length > 0) {
           // Load messages from the most recent conversation
           const msgRes = await authFetch(`/api/anzaro/conversations/list-messages?id=${convs[0].id}`)
           const msgData = await msgRes.json()
-          if (msgData.messages) {
-            setItems(msgData.messages.slice(-15).reverse()) // Last 15, newest first
+          // Defensive: never assume messages is iterable
+          const messages = Array.isArray(msgData.messages) ? msgData.messages : []
+          if (messages.length > 0) {
+            setItems(messages.slice(-15).reverse()) // Last 15, newest first
           }
         }
       } catch {}

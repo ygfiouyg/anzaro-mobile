@@ -56,11 +56,14 @@ export function SmartBallOverlay() {
       setBall({ status: 'processing', label: 'Processing', labelAr: 'بفكّر' });
     } else if (!isStreaming && ball.status === 'processing') {
       setBall({ status: 'speaking', label: 'Speaking', labelAr: 'بتكلم' });
-      // Auto-speak the last assistant message
-      const messages = useChatStore.getState().messages;
-      const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content);
-      if (lastAssistant?.content) {
-        speak(lastAssistant.content, token || undefined);
+      // Auto-speak the last assistant message — defensive: never assume messages is iterable
+      const storeMessages = useChatStore.getState().messages;
+      const messages = Array.isArray(storeMessages) ? storeMessages : [];
+      if (messages.length > 0) {
+        const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content);
+        if (lastAssistant?.content) {
+          speak(lastAssistant.content, token || undefined);
+        }
       }
       const t = setTimeout(() => {
         setBall({ status: 'idle', label: 'Idle', labelAr: 'في انتظارك' });
@@ -150,9 +153,13 @@ export function SmartBallOverlay() {
           if (speaking) {
             stop()
           } else {
-            const messages = useChatStore.getState().messages
-            const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content)
-            if (lastAssistant?.content) speak(lastAssistant.content, token || undefined)
+            // Defensive: never assume messages is iterable
+            const storeMessages = useChatStore.getState().messages
+            const messages = Array.isArray(storeMessages) ? storeMessages : []
+            if (messages.length > 0) {
+              const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant' && m.content)
+              if (lastAssistant?.content) speak(lastAssistant.content, token || undefined)
+            }
           }
         }}
         initial={{ scale: 0, opacity: 0 }}
