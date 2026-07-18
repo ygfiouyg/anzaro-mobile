@@ -13,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 
 import { IdentityProvider, useIdentity } from './mobile/context/IdentityContext';
 import DashboardScreen from './mobile/screens/DashboardScreen';
-import AnzaroChatScreen from './screens/AnzaroChatScreen';
+import ChatScreen from './mobile/screens/ChatScreen';
 import HomeAssistantScreen from './screens/HomeAssistantScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import OnboardingBridgeScreen from './mobile/screens/OnboardingBridgeScreen';
@@ -70,7 +70,7 @@ function AppNavigator() {
         />
         <Tab.Screen
           name="Chat"
-          component={AnzaroChatScreen}
+          component={ChatScreen}
           options={{
             title: 'أنظاره',
             tabBarIcon: ({ color, size }) => (
