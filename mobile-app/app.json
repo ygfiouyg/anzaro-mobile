@@ -2,46 +2,24 @@
   "expo": {
     "name": "Anzaro",
     "slug": "anzaro-mobile",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "scheme": "anzaro",
     "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0f0f1e",
       "resizeMode": "contain"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anzaro.mobile"
     },
     "android": {
-      "package": "com.anzaro.mobile",
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#0f0f1e"
-      }
+      "package": "com.anzaro.mobile"
     },
-    "web": {
-      "bundler": "metro",
-      "output": "static"
-    },
-    "plugins": [
-      "expo-secure-store"
-    ],
     "extra": {
-      "ANZARO_API_URL": "https://kopabdo-delta-ai-v2.hf.space",
-      "HASS_URL": "",
-      "HASS_TOKEN": "",
       "eas": {
         "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
       }
-    },
-    "eas": {
-      "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
     },
     "owner": "anzaro"
   }

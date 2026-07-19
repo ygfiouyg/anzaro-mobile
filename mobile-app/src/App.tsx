@@ -1,18 +1,18 @@
 /**
- * Anzaro Mobile — Root App (V.14 Bulletproof)
- * ============================================
- * Architecture:
- * 1. SplashScreen.preventAutoHideAsync() — called BEFORE React mounts
- * 2. Async hydration wrapper — all storage/DB calls inside useEffect
- * 3. Safe null fallback — return null while !isReady (splash stays visible)
- * 4. SplashScreen.hideAsync() — only called after hydration completes
- * 5. NavigationContainer — completely decoupled from DB queries
- * 6. ErrorBoundary — catches any render crash
+ * Anzaro Mobile — v2.3.0 Zero-Crash Root
+ * =======================================
+ * STRIPPED TO BARE MINIMUM:
+ * - No SplashScreen module (causes native init race condition)
+ * - No AsyncStorage at root level (deferred to screens)
+ * - No SecureStore (removed from deps entirely)
+ * - No Constants.expoConfig reads at module scope
+ * - No network calls at root
+ * - Primitive fallback UI (pure View + Text, zero custom components)
+ * - ErrorBoundary wraps everything
  */
 
 import React, { Component, useState, useEffect, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import * as SplashScreen from 'expo-splash-screen';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -21,19 +21,9 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   ActivityIndicator, RefreshControl, TextInput, FlatList,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ═══════════════════════════════════════════════════
-// STEP 1: Prevent splash from auto-hiding BEFORE React mounts
-// This must be at module scope — runs synchronously on app start
-// ═══════════════════════════════════════════════════
-SplashScreen.preventAutoHideAsync().catch(() => {
-  // V.14: Silent catch — preventAutoHideAsync can fail in some edge cases
-  // The app will still work, just splash might flash briefly
-});
-
-// ═══════════════════════════════════════════════════
-// CONSTANTS
+// CONSTANTS — hardcoded, no process.env or Constants reads
 // ═══════════════════════════════════════════════════
 const ANZARO_API = 'https://kopabdo-delta-ai-v2.hf.space';
 
@@ -41,7 +31,6 @@ const C = {
   bg: '#0f0f1e',
   card: '#1a1a2e',
   primary: '#7c3aed',
-  primaryL: '#a78bfa',
   text: '#ffffff',
   muted: '#9ca3af',
   success: '#10b981',
@@ -51,33 +40,26 @@ const C = {
 };
 
 // ═══════════════════════════════════════════════════
-// ERROR BOUNDARY
+// ERROR BOUNDARY — catches ANY render crash
 // ═══════════════════════════════════════════════════
-class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
-  state = { hasError: false, error: '' };
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
 
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error: error?.message ?? 'Unknown crash' };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error) {
-    console.error('[Anzaro] Root crash:', error?.message);
+    console.error('[Anzaro] Crash:', error?.message);
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <View style={styles.errorContainer}>
-          <View style={styles.errorOrb} />
-          <Text style={styles.errorTitle}>Anzaro</Text>
-          <Text style={styles.errorText}>حدث خطأ غير متوقع</Text>
-          <Text style={styles.errorDetail} numberOfLines={3}>{this.state.error}</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => this.setState({ hasError: false, error: '' })}
-          >
-            <Text style={styles.retryText}>إعادة المحاولة</Text>
-          </TouchableOpacity>
+        <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: C.danger, marginBottom: 16 }} />
+          <Text style={{ color: C.text, fontSize: 22, fontWeight: 'bold' }}>Anzaro</Text>
+          <Text style={{ color: C.muted, fontSize: 13, marginTop: 8 }}>حدث خطأ — أعد فتح التطبيق</Text>
         </View>
       );
     }
@@ -86,85 +68,86 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 }
 
 // ═══════════════════════════════════════════════════
+// PRIMITIVE FALLBACK UI — zero external deps, cannot crash
+// ═══════════════════════════════════════════════════
+function BootScreen() {
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{
+        width: 70, height: 70, borderRadius: 35,
+        backgroundColor: C.primary,
+        marginBottom: 20,
+      }} />
+      <Text style={{ color: C.text, fontSize: 24, fontWeight: 'bold' }}>Anzaro</Text>
+      <Text style={{ color: C.muted, fontSize: 13, marginTop: 8 }}>جاري تحميل أنظاره...</Text>
+      <ActivityIndicator size="small" color={C.primary} style={{ marginTop: 16 }} />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════
 // DASHBOARD SCREEN
 // ═══════════════════════════════════════════════════
 function DashboardScreen() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [hasIdentity, setHasIdentity] = useState<boolean | null>(null);
 
-  const checkAll = useCallback(async () => {
+  const checkCloud = useCallback(async () => {
     setRefreshing(true);
-    // Check cloud — wrapped in try/catch, never crashes
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const t = setTimeout(() => controller.abort(), 5000);
       const res = await fetch(`${ANZARO_API}/api/status`, { signal: controller.signal });
-      clearTimeout(timeout);
+      clearTimeout(t);
       setConnected(res?.ok ?? false);
     } catch {
       setConnected(false);
     }
-    // Check identity — wrapped in try/catch
-    try {
-      const stored = await AsyncStorage?.getItem?.('@anzaro_identity');
-      setHasIdentity(!!stored);
-    } catch {
-      setHasIdentity(false);
-    }
     setRefreshing(false);
   }, []);
 
-  useEffect(() => {
-    checkAll();
-  }, [checkAll]);
+  useEffect(() => { checkCloud(); }, [checkCloud]);
 
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={checkAll} tintColor={C.primary} />}
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={checkCloud} tintColor={C.primary} />}
       >
-        <View style={styles.orb}>
-          <View style={styles.orbInner} />
-        </View>
-        <Text style={styles.brandTitle}>Anzaro</Text>
-        <Text style={styles.brandSub}>الكرة الذكية</Text>
+        <View style={styles.orb} />
+        <Text style={styles.title}>Anzaro</Text>
+        <Text style={styles.sub}>الكرة الذكية</Text>
 
-        <View style={[styles.card, connected === false && styles.cardWarning, connected === true && styles.cardSuccess]}>
-          <View style={styles.cardRow}>
-            <Ionicons name={connected === true ? 'cloud' : connected === false ? 'cloud-offline' : 'hourglass'} size={20} color={connected === true ? C.success : connected === false ? C.warning : C.muted} />
-            <Text style={styles.cardLabel}>Cloud Brain</Text>
-            <Text style={[styles.cardValue, connected === true && styles.valueSuccess, connected === false && styles.valueWarning]}>
-              {connected === true ? 'متصل ✅' : connected === false ? 'غير متصل ❌' : '...'}
+        <View style={[styles.card, connected === true && { borderColor: C.success + '30' }, connected === false && { borderColor: C.warning + '30' }]}>
+          <View style={styles.row}>
+            <Ionicons name={connected ? 'cloud' : 'cloud-offline'} size={20} color={connected ? C.success : C.warning} />
+            <Text style={styles.label}>Cloud Brain</Text>
+            <Text style={[styles.val, connected ? { color: C.success } : { color: C.warning }]}>
+              {connected === true ? 'متصل' : connected === false ? 'غير متصل' : '...'}
             </Text>
           </View>
-          <Text style={styles.cardUrl}>{ANZARO_API}</Text>
+          <Text style={styles.url}>{ANZARO_API}</Text>
         </View>
 
         <View style={styles.card}>
-          <View style={styles.cardRow}>
-            <Ionicons name="person-circle" size={20} color={C.primary} />
-            <Text style={styles.cardLabel}>Identity Matrix</Text>
-            <Text style={styles.cardValue}>{hasIdentity === true ? 'جاهز ✅' : hasIdentity === false ? 'غير مُهيأ' : '...'}</Text>
+          <View style={styles.row}>
+            <Ionicons name="cube" size={20} color={C.primary} />
+            <Text style={styles.label}>الأدوات</Text>
+            <Text style={styles.val}>68</Text>
           </View>
         </View>
-
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Ionicons name="cube" size={16} color={C.primaryL} />
-            <Text style={styles.statValue}>68</Text>
-            <Text style={styles.statLabel}>أدوات</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Ionicons name="hardware-chip" size={20} color={C.primary} />
+            <Text style={styles.label}>النماذج</Text>
+            <Text style={styles.val}>26</Text>
           </View>
-          <View style={styles.statBox}>
-            <Ionicons name="hardware-chip" size={16} color={C.primaryL} />
-            <Text style={styles.statValue}>26</Text>
-            <Text style={styles.statLabel}>نماذج</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Ionicons name="bulb" size={16} color={C.primaryL} />
-            <Text style={styles.statValue}>8</Text>
-            <Text style={styles.statLabel}>أجهزة</Text>
+        </View>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Ionicons name="bulb" size={20} color={C.primary} />
+            <Text style={styles.label}>الأجهزة</Text>
+            <Text style={styles.val}>8</Text>
           </View>
         </View>
       </ScrollView>
@@ -179,7 +162,7 @@ interface Msg { id: string; role: 'user' | 'assistant'; text: string; }
 
 function ChatScreen() {
   const [messages, setMessages] = useState<Msg[]>([
-    { id: '1', role: 'assistant', text: 'أهلاً! أنا أنظاره. كيف أقدر أساعدك؟ 🤖' },
+    { id: '1', role: 'assistant', text: 'أهلاً! أنا أنظاره. كيف أقدر أساعدك؟' },
   ]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -188,61 +171,51 @@ function ChatScreen() {
     const text = input?.trim();
     if (!text || sending) return;
 
-    const userMsg: Msg = { id: `u_${Date.now()}`, role: 'user', text };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, { id: `u${Date.now()}`, role: 'user', text }]);
     setInput('');
     setSending(true);
 
     try {
-      const token = await AsyncStorage?.getItem?.('@anzaro_token');
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const t = setTimeout(() => controller.abort(), 30000);
       const res = await fetch(`${ANZARO_API}/api/chat/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, model: 'delta-general', language: 'ar' }),
         signal: controller.signal,
       });
-      clearTimeout(timeout);
+      clearTimeout(t);
 
       if (res?.ok && res.body) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let fullText = '';
+        let full = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk?.split('\n') ?? [];
-          for (const line of lines) {
+          for (const line of chunk?.split('\n') ?? []) {
             if (!line?.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
+            const d = line.slice(6).trim();
+            if (d === '[DONE]') continue;
             try {
-              const parsed = JSON.parse(data);
-              if (parsed?.content) fullText += parsed.content;
+              const p = JSON.parse(d);
+              if (p?.content) full += p.content;
             } catch {}
           }
         }
-        if (fullText) {
-          setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: fullText }]);
-        } else {
-          setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'تمام 👍' }]);
-        }
+        setMessages(prev => [...prev, { id: `a${Date.now()}`, role: 'assistant', text: full || 'تمام' }]);
       } else {
-        setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'مش قادر أوصل للسيرفر. جرّب تاني.' }]);
+        setMessages(prev => [...prev, { id: `a${Date.now()}`, role: 'assistant', text: 'مش قادر أوصل للسيرفر' }]);
       }
     } catch {
-      setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'فيه مشكلة في النت.' }]);
+      setMessages(prev => [...prev, { id: `a${Date.now()}`, role: 'assistant', text: 'فيه مشكلة في النت' }]);
     }
     setSending(false);
   }, [input, sending]);
 
-  const renderMsg = useCallback(({ item }: { item: Msg }) => (
-    <View style={[styles.msgBubble, item.role === 'user' ? styles.msgUser : styles.msgAI]}>
+  const renderItem = useCallback(({ item }: { item: Msg }) => (
+    <View style={[styles.msg, item.role === 'user' ? styles.msgUser : styles.msgAI]}>
       <Text style={styles.msgText}>{item.text}</Text>
     </View>
   ), []);
@@ -251,9 +224,9 @@ function ChatScreen() {
     <SafeAreaView style={styles.screen}>
       <FlatList
         data={messages}
-        keyExtractor={item => item.id}
-        renderItem={renderMsg}
-        contentContainerStyle={{ padding: 16, gap: 8 }}
+        keyExtractor={i => i.id}
+        renderItem={renderItem}
+        contentContainerStyle={{ padding: 16 }}
       />
       <View style={styles.inputBar}>
         <TextInput
@@ -262,14 +235,9 @@ function ChatScreen() {
           onChangeText={setInput}
           placeholder="اكتب لـ Anzaro..."
           placeholderTextColor={C.muted}
-          multiline
           editable={!sending}
         />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!input?.trim() || sending) && styles.sendDisabled]}
-          onPress={send}
-          disabled={!input?.trim() || sending}
-        >
+        <TouchableOpacity style={[styles.send, (!input?.trim() || sending) && { opacity: 0.4 }]} onPress={send} disabled={!input?.trim() || sending}>
           {sending ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
         </TouchableOpacity>
       </View>
@@ -282,55 +250,38 @@ function ChatScreen() {
 // ═══════════════════════════════════════════════════
 function HomeScreen() {
   const [devices, setDevices] = useState([
-    { id: '1', name: 'Living Room Light', domain: 'light', state: 'off' },
-    { id: '2', name: 'Office Light', domain: 'light', state: 'off' },
-    { id: '3', name: 'Smart Plug', domain: 'switch', state: 'off' },
-    { id: '4', name: 'Phone DND', domain: 'switch', state: 'off' },
-    { id: '5', name: 'Living Room AC', domain: 'climate', state: 'off' },
-    { id: '6', name: 'Temperature', domain: 'sensor', state: '24.5°C' },
-    { id: '7', name: 'Humidity', domain: 'sensor', state: '55%' },
+    { id: '1', name: 'Light - Living Room', icon: 'bulb', state: 'off' },
+    { id: '2', name: 'Light - Office', icon: 'bulb', state: 'off' },
+    { id: '3', name: 'Smart Plug', icon: 'power', state: 'off' },
+    { id: '4', name: 'Phone DND', icon: 'notifications-off', state: 'off' },
+    { id: '5', name: 'AC - Living Room', icon: 'snow', state: 'off' },
+    { id: '6', name: 'Temperature', icon: 'speedometer', state: '24.5°C' },
+    { id: '7', name: 'Humidity', icon: 'water', state: '55%' },
   ]);
-  const [refreshing, setRefreshing] = useState(false);
 
   const toggle = useCallback((id: string) => {
     setDevices(prev => prev.map(d => d.id === id ? { ...d, state: d.state === 'on' ? 'off' : 'on' } : d));
   }, []);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
-
-  const domainIcons: Record<string, string> = {
-    light: 'bulb', switch: 'power', climate: 'snow', sensor: 'speedometer',
-  };
-  const domainColors: Record<string, string> = {
-    light: '#f59e0b', switch: '#3b82f6', climate: '#06b6d4', sensor: '#10b981',
-  };
-
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={{ padding: 16 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
-      >
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
         <Text style={styles.sectionTitle}>الأجهزة</Text>
-        <View style={styles.deviceGrid}>
+        <View style={styles.grid}>
           {devices.map(d => {
             const isOn = d.state === 'on';
-            const color = domainColors[d.domain] ?? C.muted;
             return (
               <TouchableOpacity
                 key={d.id}
-                style={[styles.deviceCard, isOn && { borderColor: color + '40', backgroundColor: color + '0D' }]}
-                onPress={() => d.domain !== 'sensor' && toggle(d.id)}
+                style={[styles.devCard, isOn && { borderColor: C.primary + '40', backgroundColor: C.primary + '0D' }]}
+                onPress={() => !d.state.includes('°') && !d.state.includes('%') && toggle(d.id)}
                 activeOpacity={0.7}
               >
-                <View style={[styles.deviceIcon, { backgroundColor: isOn ? color + '22' : 'rgba(255,255,255,0.05)' }]}>
-                  <Ionicons name={domainIcons[d.domain] ?? 'hardware-chip'} size={18} color={isOn ? color : C.muted} />
+                <View style={[styles.devIcon, { backgroundColor: isOn ? C.primary + '22' : 'rgba(255,255,255,0.05)' }]}>
+                  <Ionicons name={d.icon} size={18} color={isOn ? C.primary : C.muted} />
                 </View>
-                <Text style={styles.deviceName} numberOfLines={1}>{d.name}</Text>
-                <Text style={[styles.deviceState, { color: isOn ? color : C.muted }]}>{d.state}</Text>
+                <Text style={styles.devName} numberOfLines={1}>{d.name}</Text>
+                <Text style={[styles.devState, { color: isOn ? C.primary : C.muted }]}>{d.state}</Text>
               </TouchableOpacity>
             );
           })}
@@ -344,64 +295,61 @@ function HomeScreen() {
 // SETTINGS SCREEN
 // ═══════════════════════════════════════════════════
 function SettingsScreen() {
-  const [token, setToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    AsyncStorage?.getItem?.('@anzaro_token')
-      .then(t => setToken(t))
-      .catch(() => setToken(null));
-  }, []);
-
-  const logout = useCallback(async () => {
-    try {
-      await AsyncStorage?.multiRemove?.(['@anzaro_token', '@anzaro_identity']);
-    } catch {}
-    setToken(null);
-  }, []);
-
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        <Text style={styles.brandTitle}>الإعدادات</Text>
+        <Text style={styles.title}>الإعدادات</Text>
         <View style={styles.card}>
-          <View style={styles.cardRow}>
+          <View style={styles.row}>
             <Ionicons name="information-circle" size={20} color={C.primary} />
-            <Text style={styles.cardLabel}>التطبيق</Text>
-            <Text style={styles.cardValue}>Anzaro v2.2.0</Text>
+            <Text style={styles.label}>التطبيق</Text>
+            <Text style={styles.val}>Anzaro v2.3.0</Text>
           </View>
         </View>
         <View style={styles.card}>
-          <View style={styles.cardRow}>
+          <View style={styles.row}>
             <Ionicons name="server" size={20} color={C.success} />
-            <Text style={styles.cardLabel}>Cloud Brain</Text>
+            <Text style={styles.label}>Cloud Brain</Text>
           </View>
-          <Text style={styles.cardUrl}>{ANZARO_API}</Text>
+          <Text style={styles.url}>{ANZARO_API}</Text>
         </View>
         <View style={styles.card}>
-          <View style={styles.cardRow}>
-            <Ionicons name="key" size={20} color={token ? C.success : C.warning} />
-            <Text style={styles.cardLabel}>الحالة</Text>
-            <Text style={styles.cardValue}>{token ? 'مسجل دخول' : 'ضيف'}</Text>
+          <View style={styles.row}>
+            <Ionicons name="shield-checkmark" size={20} color={C.success} />
+            <Text style={styles.label}>الحالة</Text>
+            <Text style={styles.val}>V.14 Defensive</Text>
           </View>
         </View>
-        {token && (
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.7}>
-            <Ionicons name="log-out" size={18} color={C.danger} />
-            <Text style={styles.logoutText}>تسجيل الخروج</Text>
-          </TouchableOpacity>
-        )}
-        <Text style={styles.versionText}>Anzaro AI · V.14 · Smart Ball</Text>
+        <Text style={styles.version}>Anzaro AI · Smart Ball · V.14</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 // ═══════════════════════════════════════════════════
-// NAVIGATION (completely decoupled from DB queries)
+// ROOT APP — Minimal boot, no native modules at root
 // ═══════════════════════════════════════════════════
 const Tab = createBottomTabNavigator();
 
-function AppNavigator() {
+function AppContent() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // Fail-safe bootstrap: minimal delay, no native calls
+    const boot = async () => {
+      await new Promise(r => setTimeout(r, 500));
+      setReady(true);
+    };
+    // 2s hard timeout
+    const timeout = setTimeout(() => setReady(true), 2000);
+    boot();
+    return () => clearTimeout(timeout);
+  }, []);
+
+  if (!ready) {
+    return <BootScreen />;
+  }
+
   return (
     <NavigationContainer>
       <StatusBar style="light" />
@@ -409,102 +357,23 @@ function AppNavigator() {
         screenOptions={{
           tabBarActiveTintColor: C.primary,
           tabBarInactiveTintColor: C.muted,
-          tabBarStyle: {
-            backgroundColor: C.bg,
-            borderTopColor: C.border,
-            paddingBottom: 5,
-            height: 60,
-          },
+          tabBarStyle: { backgroundColor: C.bg, borderTopColor: C.border, height: 60, paddingBottom: 5 },
           headerStyle: { backgroundColor: C.bg },
           headerTintColor: C.text,
           headerTitleStyle: { fontWeight: 'bold' },
         }}
       >
-        <Tab.Screen
-          name="Dashboard"
-          component={DashboardScreen}
-          options={{
-            title: 'الرئيسية',
-            tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size ?? 24} color={color ?? C.primary} />,
-          }}
-        />
-        <Tab.Screen
-          name="Chat"
-          component={ChatScreen}
-          options={{
-            title: 'أنظاره',
-            tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble" size={size ?? 24} color={color ?? C.primary} />,
-          }}
-        />
-        <Tab.Screen
-          name="Home"
-          component={HomeScreen}
-          options={{
-            title: 'المنزل',
-            tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size ?? 24} color={color ?? C.primary} />,
-          }}
-        />
-        <Tab.Screen
-          name="Settings"
-          component={SettingsScreen}
-          options={{
-            title: 'الإعدادات',
-            tabBarIcon: ({ color, size }) => <Ionicons name="settings" size={size ?? 24} color={color ?? C.primary} />,
-          }}
-        />
+        <Tab.Screen name="Dashboard" component={DashboardScreen}
+          options={{ title: 'الرئيسية', tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size} color={color} /> }} />
+        <Tab.Screen name="Chat" component={ChatScreen}
+          options={{ title: 'أنظاره', tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble" size={size} color={color} /> }} />
+        <Tab.Screen name="Home" component={HomeScreen}
+          options={{ title: 'المنزل', tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }} />
+        <Tab.Screen name="Settings" component={SettingsScreen}
+          options={{ title: 'الإعدادات', tabBarIcon: ({ color, size }) => <Ionicons name="settings" size={size} color={color} /> }} />
       </Tab.Navigator>
     </NavigationContainer>
   );
-}
-
-// ═══════════════════════════════════════════════════
-// ROOT APP — Bulletproof async hydration
-// ═══════════════════════════════════════════════════
-function AppContent() {
-  const [isReady, setIsReady] = useState(false);
-
-  // STEP 2: Async hydration wrapper — all storage checks inside useEffect
-  useEffect(() => {
-    const bootstrap = async () => {
-      // V.14: All native storage calls wrapped in try/catch
-      // Nothing synchronous — everything is inside this async function
-      try {
-        // Test AsyncStorage access (don't crash if it fails)
-        await AsyncStorage?.getItem?.('@anzaro_init_test');
-      } catch {
-        // Storage error — continue anyway, app will work in guest mode
-      }
-
-      // Minimum splash time for smooth UX (prevents flash)
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // STEP 3: Mark as ready — safe to render
-      setIsReady(true);
-    };
-
-    // Hard timeout — if bootstrap hangs, force ready after 3s
-    const hardTimeout = setTimeout(() => {
-      setIsReady(true);
-    }, 3000);
-
-    bootstrap();
-
-    return () => clearTimeout(hardTimeout);
-  }, []);
-
-  // STEP 3: Safe null fallback — return null while !isReady
-  // Splash screen stays visible because we called preventAutoHideAsync
-  if (!isReady) {
-    return null; // Safe — splash is still showing natively
-  }
-
-  // STEP 4: Hide splash screen after hydration — wrapped in try/catch
-  SplashScreen.hideAsync().catch(() => {
-    // V.14: If hideAsync fails, the splash will auto-hide eventually
-  });
-
-  // STEP 5: Navigation decoupled — no DB queries at root level
-  return <AppNavigator />;
 }
 
 export default function App() {
@@ -521,47 +390,28 @@ export default function App() {
 // STYLES
 // ═══════════════════════════════════════════════════
 const styles = StyleSheet.create({
-  errorContainer: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  errorOrb: { width: 60, height: 60, borderRadius: 30, backgroundColor: C.danger, marginBottom: 16 },
-  errorTitle: { color: C.text, fontSize: 24, fontWeight: 'bold' },
-  errorText: { color: C.muted, fontSize: 14, marginTop: 8 },
-  errorDetail: { color: C.danger, fontSize: 11, marginTop: 4, textAlign: 'center' },
-  retryBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: C.primary, borderRadius: 12 },
-  retryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   screen: { flex: 1, backgroundColor: C.bg },
-  scrollContent: { padding: 20, alignItems: 'center' },
-  orb: { width: 80, height: 80, borderRadius: 40, marginBottom: 16, justifyContent: 'center', alignItems: 'center' },
-  orbInner: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.primary, shadowColor: C.primary, shadowOpacity: 0.5, shadowRadius: 25, elevation: 12 },
-  brandTitle: { color: C.text, fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
-  brandSub: { color: C.muted, fontSize: 14, marginBottom: 24 },
+  scroll: { padding: 20, alignItems: 'center' },
+  orb: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.primary, marginBottom: 16, shadowColor: C.primary, shadowOpacity: 0.5, shadowRadius: 20, elevation: 10 },
+  title: { color: C.text, fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
+  sub: { color: C.muted, fontSize: 14, marginBottom: 24 },
   card: { width: '100%', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.border },
-  cardWarning: { borderColor: C.warning + '30' },
-  cardSuccess: { borderColor: C.success + '30' },
-  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardLabel: { color: C.muted, fontSize: 13, flex: 1 },
-  cardValue: { color: C.text, fontSize: 14, fontWeight: '600' },
-  valueSuccess: { color: C.success },
-  valueWarning: { color: C.warning },
-  cardUrl: { color: C.muted, fontSize: 10, marginTop: 6, marginLeft: 30 },
-  statsRow: { flexDirection: 'row', gap: 8, width: '100%' },
-  statBox: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 },
-  statValue: { color: C.text, fontSize: 20, fontWeight: 'bold' },
-  statLabel: { color: C.muted, fontSize: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  label: { color: C.muted, fontSize: 13, flex: 1 },
+  val: { color: C.text, fontSize: 14, fontWeight: '600' },
+  url: { color: C.muted, fontSize: 10, marginTop: 6, marginLeft: 30 },
   sectionTitle: { color: C.text, fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  deviceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  deviceCard: { width: 150, backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.border },
-  deviceIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  deviceName: { color: C.text, fontSize: 13, fontWeight: '600' },
-  deviceState: { fontSize: 11, marginTop: 2, textTransform: 'capitalize' },
-  msgBubble: { maxWidth: '80%', borderRadius: 14, padding: 12, marginBottom: 8 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  devCard: { width: 150, backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.border },
+  devIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  devName: { color: C.text, fontSize: 13, fontWeight: '600' },
+  devState: { fontSize: 11, marginTop: 2, textTransform: 'capitalize' },
+  msg: { maxWidth: '80%', borderRadius: 14, padding: 12, marginBottom: 8 },
   msgUser: { alignSelf: 'flex-end', backgroundColor: C.primary },
   msgAI: { alignSelf: 'flex-start', backgroundColor: C.card },
   msgText: { color: '#fff', fontSize: 14, lineHeight: 20 },
   inputBar: { flexDirection: 'row', padding: 12, gap: 8, borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.card },
   input: { flex: 1, backgroundColor: C.bg, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: C.text, fontSize: 14, borderWidth: 1, borderColor: C.border, maxHeight: 80 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
-  sendDisabled: { opacity: 0.4 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 12, padding: 14, marginTop: 8 },
-  logoutText: { color: C.danger, fontSize: 15, fontWeight: '600' },
-  versionText: { color: C.muted, fontSize: 11, textAlign: 'center', marginTop: 20 },
+  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
+  version: { color: C.muted, fontSize: 11, textAlign: 'center', marginTop: 20 },
 });
