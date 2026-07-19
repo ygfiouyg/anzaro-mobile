@@ -24,6 +24,7 @@ import { ImageGenDialog } from './ImageGenDialog';
 import { VideoGenDialog } from './VideoGenDialog';
 import { ImageSearchDialog } from './ImageSearchDialog';
 import { SmartBallOverlay } from '@/components/anzaro/SmartBallOverlay';
+import { NowPlayingBar } from './NowPlayingBar';
 import {
   Sheet,
   SheetContent,
@@ -797,6 +798,9 @@ export function ChatApp({ onSwitchToPdfCreator }: ChatAppProps = {}) {
 
       {/* Smart Ball floating overlay — orb + control panel (devices/scenes/routines) */}
       <SmartBallOverlay />
+
+      {/* Global Now Playing bar — auto-opens when AI sends media (radio/spotify/youtube/tts) */}
+      <NowPlayingBar />
 
       {/* iOS-style clean — no extra CSS animations needed */}
     </div>

@@ -17,6 +17,8 @@ export interface MediaIntent {
   source?: 'radio' | 'spotify' | 'youtube' | 'tts';
   query?: string;
   confidence?: number;
+  /** V.15: "stop" intent — user wants to stop/close the current media */
+  action?: 'play' | 'stop';
 }
 
 // ── Known Quran reciters (radio station names) ──
@@ -89,6 +91,16 @@ function extractSearchQuery(message: string): string {
 export function detectMediaIntent(message: string): MediaIntent {
   const norm = normalizeArabic(message);
   const lower = message.toLowerCase();
+
+  // ── 0) STOP intent: user wants to stop/close current media ──
+  // Check this FIRST — "اقفل الراديو" should not be interpreted as "play radio"
+  if (/اقفل|اقفله|اقفلي|قفل|وقف|وقفه|قفلي|سكته|اسكت|إيقاف|ايقاف|stop|pause|mute|كتم|صامت|close\s+(?:the\s+)?(?:radio|player|music)|shut\s*up/i.test(message)) {
+    // Only treat as stop if there's no "play" verb alongside
+    const hasPlayVerb = /شغل|افتح|ابعت|play|start|put\s*on/i.test(message);
+    if (!hasPlayVerb || /اقفل|وقف|إيقاف|stop/i.test(message)) {
+      return { wantsMedia: true, action: 'stop', source: undefined, query: message, confidence: 0.95 };
+    }
+  }
 
   // ── 1) TTS: user wants text read aloud ──
   if (/اقرأ\s*(لي|لنا|نا)?|اقرألي|نطق|تحدث|اقرأ\s*النص|convert\s*to\s*voice|tts/i.test(message)) {

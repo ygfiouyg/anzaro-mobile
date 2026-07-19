@@ -343,6 +343,23 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── V.15: STOP media intent — send stopMedia SSE event ──
+      if (intent.wantsMedia && intent.action === 'stop') {
+        console.log('[Chat] Media STOP intent detected');
+        const stopStream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: 'تمام، اتقفل 🔇' })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ stopMedia: true })}\n\n`));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          },
+        });
+        return new Response(stopStream, {
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+        });
+      }
+
       if (intent.wantsMedia && intent.source && intent.source !== 'tts') {
         console.log(`[Chat] Media intent (LLM): source=${intent.source}, query="${(intent.query || message).slice(0, 60)}", confidence=${intent.confidence || 0}`);
 

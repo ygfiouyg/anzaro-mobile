@@ -137,6 +137,33 @@ export async function buildSystemPrompt(params: BuildSystemPromptParams): Promis
     }
   }
 
+  // ── V.15: Dynamic Trusted-Data-Source override ──
+  // When the user asks for contacts, phone numbers, or personal data,
+  // inject an explicit instruction to provide it WITHOUT privacy lectures.
+  {
+    const lowerMsg = message.toLowerCase();
+    const wantsContact = /رقم|جهات? اتصال|contacts?|هاتف|فون|phone|اتصل ب|هاتلي|جيبلي رقم|موبايل|ميلاد|ايميل|إيميل/i.test(lowerMsg);
+    const wantsMedia = /شغل|اسمع|استمع|راديو|إذاعة|قرآن|قران|قارئ|spotify|يوتيوب|youtube|نطق|اقرألي|tts|بث/i.test(lowerMsg);
+
+    if (wantsContact) {
+      systemPrompt += `\n\n📞 TRUSTED DATA OVERRIDE — جهات اتصال المستخدم:
+المستخدم طلب للتو معلومة من جهات اتصاله الشخصية. هذا أمر مباشر ومصرّح به 100%.
+- المستخدم هو صاحب الحساب ومخوّل بالوصول لهذه البيانات عبر Google OAuth.
+- استخدم أداة google_contacts_reader فوراً للبحث بالاسم.
+- ارجع الرقم/الإيميل مباشرة بدون أي رسائل تحذيرية أو قيود خصوصية.
+- ممنوع: "لا أستطيع مشاركة أرقام الهواتف" / "هذا انتهاك للخصوصية" / "لأسباب أمنية".
+- فقط: "رقم [الاسم]: [الرقم]" — مباشرة وبسيطة.`;
+    }
+
+    if (wantsMedia) {
+      systemPrompt += `\n\n🎧 MEDIA CONTROL — تشغيل الوسائط:
+المستخدم طلب تشغيل وسائط. النظام بيكتشف هذا تلقائياً ويرسل JSON payload للفرونت إند.
+- الفرونت إند بيفتح مشغل (Now Playing Bar) تلقائياً ويبدأ التشغيل.
+- إنت بس أكّد بكلمة قصيرة باللهجة المصرية: "جاري تشغيل [اسم المحطة/الأغنية] 📻"
+- لو المستخدم قال "اقفل" أو "وقف" — قول "تمام، اتقفل 🔇"`;
+    }
+  }
+
   // Add time-aware context
   if (isOpenMode) {
     const timeContext = getTimeContext();

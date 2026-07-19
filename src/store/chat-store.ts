@@ -146,6 +146,13 @@ interface ChatState {
   sidebarOpen: boolean;
   searchQuery: string;
 
+  // ── Global Active Media (Now Playing) ──
+  // When the AI sends a mediaWidget via SSE, this holds the active widget
+  // so a floating NowPlayingBar can render + auto-play across the whole app.
+  activeMedia: Message['mediaWidget'] | null;
+  setActiveMedia: (widget: NonNullable<Message['mediaWidget']>) => void;
+  clearActiveMedia: () => void;
+
   // Auto Web Search Toggle
   autoWebSearch: boolean;
   setAutoWebSearch: (value: boolean) => void;
@@ -250,6 +257,11 @@ export const useChatStore = create<ChatState>()(
       autoWebSearch: true, // البحث التلقائي في الويب — مُفعّل افتراضياً
       systemPromptMode: 'full', // وضع البرومبت — كامل افتراضياً
       generatedFiles: [],
+
+      // ── Global Active Media (Now Playing) ──
+      activeMedia: null,
+      setActiveMedia: (widget) => set({ activeMedia: widget }),
+      clearActiveMedia: () => set({ activeMedia: null }),
 
       // Batch Processing Initial State
       isBatchProcessing: false,
@@ -794,6 +806,25 @@ export const useChatStore = create<ChatState>()(
                             : conv
                         ),
                       }));
+                      // ── V.15: Also set as global active media ──
+                      // This triggers the floating NowPlayingBar to render
+                      // and auto-play the media across the whole app.
+                      get().setActiveMedia(parsed.mediaWidget);
+                      // Dispatch a global event so SmartBall + other listeners react
+                      if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('anzaro-media-play', { detail: parsed.mediaWidget }));
+                      }
+                    }
+                    // ── V.15: STOP media — clear the active media + stop all audio ──
+                    if (parsed.stopMedia) {
+                      get().clearActiveMedia();
+                      if (typeof window !== 'undefined') {
+                        // Pause ALL audio/video elements on the page
+                        document.querySelectorAll('audio, video').forEach((el) => {
+                          try { (el as HTMLMediaElement).pause(); } catch {}
+                        });
+                        window.dispatchEvent(new CustomEvent('anzaro-media-stop'));
+                      }
                     }
                     // Handle inline image generation status
                     if (parsed.imageGenStatus) {
