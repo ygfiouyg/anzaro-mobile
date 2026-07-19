@@ -1,7 +1,0 @@
-node_modules/
-*.log
-.git/
-__tests__/
-__mocks__/
-.eslintrc.js
-.prettierrc

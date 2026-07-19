@@ -1,41 +1,31 @@
 {
   "expo": {
-    "name": "Anzaro AI",
+    "name": "Anzaro",
     "slug": "anzaro-mobile",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "anzaro",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f0f1e"
+      "backgroundColor": "#0f0f1e",
+      "resizeMode": "contain"
     },
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anzaro.mobile",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Anzaro needs microphone access for voice commands to the Smart Ball.",
-        "NSSpeechRecognitionUsageDescription": "Anzaro uses speech recognition to understand your voice commands."
-      }
+      "bundleIdentifier": "com.anzaro.mobile"
     },
     "android": {
       "package": "com.anzaro.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0f0f1e"
-      },
-      "permissions": [
-        "RECORD_AUDIO",
-        "INTERNET",
-        "VIBRATE"
-      ]
+      }
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/favicon.png"
+      "output": "static"
     },
     "plugins": [
       "expo-secure-store"
@@ -43,14 +33,10 @@
     "extra": {
       "ANZARO_API_URL": "https://kopabdo-delta-ai-v2.hf.space",
       "HASS_URL": "",
-      "HASS_TOKEN": "",
-      "router": {
-        "origin": false
-      },
-      "eas": {
-        "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
-      }
+      "HASS_TOKEN": ""
     },
-    "owner": "anzaro"
+    "eas": {
+      "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
+    }
   }
 }
