@@ -57,3 +57,15 @@ server.log
 dev.log
 server.log
 *.log
+
+# Large binary/media files (HF Space rejects >10MB)
+/upload/
+/download/
+/db/*.db
+/db/*.db-journal
+/mobile-app/dist/
+/mobile-app/.expo/
+/mobile-app/node_modules/
+/tool-results/
+*.mp4
+*.hbc
