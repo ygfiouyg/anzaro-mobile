@@ -12,6 +12,7 @@
  */
 
 import ZAI from "z-ai-web-dev-sdk";
+import { getZAIClient } from "../zai-client";
 import type { ChatMessage } from "z-ai-web-dev-sdk";
 import { toolsToGLMSchemaAsync } from "./catalog";
 import { executeAgentTool, incrementAgentRunCount, type ToolResult } from "./executor";
@@ -80,7 +81,7 @@ export async function orchestrateAgent(
 
   let zai: Awaited<ReturnType<typeof ZAI.create>>;
   try {
-    zai = await ZAI.create();
+    zai = await getZAIClient();
   } catch (e: any) {
     sink({ type: "error", error: `ZAI init failed: ${e.message}` });
     return;

@@ -51,9 +51,9 @@ export interface AIDocumentResult {
 
 // ─── ZAI SDK Singleton (lazy) ─────────────────────────────────────────────
 
-async function getZAI(): Promise<NonNullable<Awaited<ReturnType<typeof import('z-ai-web-dev-sdk').default.create>>>> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  return await ZAI.create();
+async function getZAI(): Promise<any> {
+  const { getZAIClient } = await import('./zai-client');
+  return await getZAIClient();
 }
 
 // ─── Font base path (shared with legacy pipeline) ─────────────────────────

@@ -25,6 +25,7 @@
  */
 
 import ZAI from "z-ai-web-dev-sdk";
+import { getZAIClient } from "../zai-client";
 import type { ChatMessage } from "z-ai-web-dev-sdk";
 import { ADMIN_TOOLS } from "./tools";
 import { executeAdminTool, type ToolEventEmitter } from "./executor";
@@ -150,7 +151,7 @@ export async function orchestrateAdmin(
   sink: AdminSSESink,
   options: { enableThinking?: boolean } = {},
 ): Promise<void> {
-  const zai = await ZAI.create();
+  const zai = await getZAIClient();
   const glmTools = adminToolsToGLM();
 
   // 🧠 Auto-load relevant marketing skills based on the user's question

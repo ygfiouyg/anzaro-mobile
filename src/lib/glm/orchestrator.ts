@@ -34,6 +34,7 @@
  */
 
 import ZAI from "z-ai-web-dev-sdk";
+import { getZAIClient } from "../zai-client";
 import type { ChatMessage } from "z-ai-web-dev-sdk";
 import { getMCPClient } from "../mcp/mcp-client";
 import { ALL_TOOLS } from "../mcp/tools-registry";
@@ -109,7 +110,7 @@ export async function orchestrate(
   sink: SSESink,
   options: { enableThinking?: boolean; model?: string } = {},
 ): Promise<void> {
-  const zai = await ZAI.create();
+  const zai = await getZAIClient();
   const mcp = getMCPClient();
   const glmTools = mcpToolsToGLM(mcp.listAllTools());
 

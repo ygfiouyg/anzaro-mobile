@@ -11,10 +11,10 @@ declare global {
   var _batchZaiClient: any;
 }
 
-async function getZAIClient() {
+async function getZAI() {
   if (!globalThis._batchZaiClient) {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    globalThis._batchZaiClient = await ZAI.create();
+    const { getZAIClient } = await import('./zai-client');
+    globalThis._batchZaiClient = await getZAIClient();
   }
   return globalThis._batchZaiClient;
 }

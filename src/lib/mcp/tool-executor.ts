@@ -14,11 +14,12 @@ import crypto from "crypto";
 import { randomUUID } from "crypto";
 import { ALL_TOOLS, TOOL_MAP } from "./tools-registry";
 import ZAI from "z-ai-web-dev-sdk";
+import { getZAIClient } from "../zai-client";
 
 // Lazily-initialised GLM client (shared across media/vision/summary tools)
 let _zai: ZAI | null = null;
 async function getZAI(): Promise<ZAI> {
-  if (!_zai) _zai = await ZAI.create();
+  if (!_zai) _zai = await getZAIClient();
   return _zai;
 }
 

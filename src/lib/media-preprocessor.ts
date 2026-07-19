@@ -22,10 +22,10 @@ declare global {
   var _zaiClientMediaPreprocessor: any;
 }
 
-async function getZAIClient() {
+async function getZAI() {
   if (!globalThis._zaiClientMediaPreprocessor) {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    globalThis._zaiClientMediaPreprocessor = await ZAI.create();
+    const { getZAIClient } = await import('./zai-client');
+    globalThis._zaiClientMediaPreprocessor = await getZAIClient();
   }
   return globalThis._zaiClientMediaPreprocessor;
 }

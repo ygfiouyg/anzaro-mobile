@@ -1,10 +1,10 @@
-import ZAI from 'z-ai-web-dev-sdk'
 import type { ChatIntent, PersonalityTraits } from './anzaro-types'
+import { getZAIClient } from './zai-client'
 
-let _zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
+let _zai: any = null
 
 async function getZAI() {
-  if (!_zai) _zai = await ZAI.create()
+  if (!_zai) _zai = await getZAIClient()
   return _zai
 }
 

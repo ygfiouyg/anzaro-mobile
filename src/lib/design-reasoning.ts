@@ -384,9 +384,8 @@ async function generateReasoningWithLLM(
   // Dynamic import with error handling to prevent crashes
   let zai: any;
   try {
-    const ZAIModule = await import('z-ai-web-dev-sdk');
-    const ZAI = ZAIModule.default;
-    zai = await ZAI.create();
+    const { getZAIClient } = await import('./zai-client');
+    zai = await getZAIClient();
   } catch (importError) {
     console.error('[Design Reasoning] Failed to load ZAI SDK, falling back to algorithmic generator:', importError);
     return generateReasoningAlgorithmically(content, language, userPreferences, styleDescription);

@@ -1365,8 +1365,8 @@ declare global {
 
 async function getDocBatchZAIClient() {
   if (!globalThis._docBatchZaiClient) {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    globalThis._docBatchZaiClient = await ZAI.create();
+    const { getZAIClient } = await import('./zai-client');
+    globalThis._docBatchZaiClient = await getZAIClient();
   }
   return globalThis._docBatchZaiClient;
 }
@@ -1527,8 +1527,8 @@ declare global {
 
 async function getImageGenZAIClient() {
   if (!globalThis._docImageZaiClient) {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    globalThis._docImageZaiClient = await ZAI.create();
+    const { getZAIClient } = await import('./zai-client');
+    globalThis._docImageZaiClient = await getZAIClient();
   }
   return globalThis._docImageZaiClient;
 }
