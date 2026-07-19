@@ -1,0 +1,56 @@
+name: Build Anzaro APK (Gradle Direct)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile-app/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Expo CLI
+        run: npm install -g expo-cli@latest
+
+      - name: Install dependencies
+        working-directory: mobile-app
+        run: npm install --legacy-peer-deps
+
+      - name: Prebuild native project
+        working-directory: mobile-app
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build APK with Gradle
+        working-directory: mobile-app/android
+        run: ./gradlew assembleRelease
+
+      - name: Find APK
+        working-directory: mobile-app
+        run: |
+          find . -name "*.apk" -type f
+          APK_PATH=$(find . -name "*.apk" -type f | head -1)
+          echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anzaro-apk
+          path: mobile-app/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+
+      - name: Print download instructions
+        run: |
+          echo "::notice::APK built! Download it from the Actions tab → Artifacts section"
