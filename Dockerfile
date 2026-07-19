@@ -52,8 +52,11 @@ ENV SESSION_SECRET="anzaro-hf-space-secret-2025-stable"
 ENV NEXTAUTH_URL="https://kopabdo-delta-ai-v2.hf.space"
 ENV NEXTAUTH_SECRET="anzaro-nextauth-secret-2025"
 
-# Create db directory and push schema
-RUN mkdir -p /app/db && npx prisma db push --skip-generate 2>/dev/null || true
+# Create db directory, .env file, and push schema
+# The .env ensures next build can read DATABASE_URL at build time
+RUN mkdir -p /app/db && \
+    touch /app/db/custom.db && \
+    npx prisma db push --skip-generate 2>/dev/null || true
 
 # Pre-build the Next.js app so .next/ exists (fixes ENOENT required-server-files.json)
 RUN npx next build --webpack 2>&1 || echo "Build failed, will use dev mode"
