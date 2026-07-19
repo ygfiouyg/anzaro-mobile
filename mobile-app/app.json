@@ -11,7 +11,9 @@
       "backgroundColor": "#0f0f1e",
       "resizeMode": "contain"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anzaro.mobile"
@@ -33,10 +35,14 @@
     "extra": {
       "ANZARO_API_URL": "https://kopabdo-delta-ai-v2.hf.space",
       "HASS_URL": "",
-      "HASS_TOKEN": ""
+      "HASS_TOKEN": "",
+      "eas": {
+        "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
+      }
     },
     "eas": {
       "projectId": "1f3122c7-0c43-4abd-874e-9c3a136a3130"
-    }
+    },
+    "owner": "anzaro"
   }
 }
