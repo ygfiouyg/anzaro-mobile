@@ -1,7 +1,6 @@
 {
   "cli": {
     "version": ">= 5.0.0",
-    "promptToConfigurePushNotifications": false,
     "appVersionSource": "remote"
   },
   "build": {
@@ -11,33 +10,17 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleDebug"
-      },
-      "ios": {
-        "simulator": true
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "distribution": "internal"
       }
     },
     "production": {
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "distribution": "store"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "track": "internal"
       }
     }
   }
