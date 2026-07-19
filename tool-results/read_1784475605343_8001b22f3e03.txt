@@ -1,0 +1,2002 @@
+     1→import { NextRequest } from 'next/server';
+     2→
+     3→// ─── Route Configuration ────────────────────────────────────────────
+     4→// maxDuration = 300s default, 600s (10 min) for high-memory models
+     5→// الموديلات اللي context window >= 500K بتحلل ملفات ضخمة → محتاجة وقت أطول
+     6→export const maxDuration = 600;
+     7→export const dynamic = 'force-dynamic';
+     8→
+     9→// NOTE: The old `export const config = { api: { bodyParser: { sizeLimit: '50mb' } } }`
+    10→// was a Pages Router concept and is ignored in App Router (caused a deprecation
+    11→// warning). In App Router, request body size is handled by the runtime — large
+    12→// bodies (PDF attachments) are read via request.json() which has no artificial cap.
+    13→
+    14→import { db } from '@/lib/db';
+    15→import { getUserFromToken, extractBearerToken } from '@/lib/auth';
+    16→import { getModelById } from '@/lib/models';
+    17→import { recordApiResponseTime, recordError, registerConnection, unregisterConnection } from '@/lib/system-monitor';
+    18→import { CHAT_MODEL_MAP, streamChatCompletion } from '@/lib/pollinations';
+    19→import type { PollinationsChatMessage } from '@/lib/pollinations';
+    20→import { getHFChatModelMapping, streamHFChat } from '@/lib/huggingface';
+    21→import { streamHFChatCompletion, chatWithFallback, getChatModelById, HF_API_TOKEN } from '@/lib/hf-chat.service';
+    22→import { streamGeminiChat, getGeminiChatModelMapping, GEMINI_API_KEY } from '@/lib/gemini';
+    23→import { streamOpenRouterChat, getOpenRouterChatModelMapping, OPENROUTER_API_KEY } from '@/lib/openrouter';
+    24→import { generateQuiz, extractTopicFromMessage, buildConversationContext } from '@/lib/quiz-service';
+    25→import { streamGroqChat, getGroqChatModelMapping, GROQ_API_KEY } from '@/lib/groq';
+    26→import { streamCloudflareChat, getCloudflareChatModelMapping, isCloudflareChatModel, CF_API_TOKEN } from '@/lib/cloudflare-ai';
+    27→import { streamGitHubChat, getGitHubChatModelMapping, GITHUB_API_KEY } from '@/lib/github-models';
+    28→import { streamCerebrasChat, getCerebrasChatModelMapping, CEREBRAS_API_KEY } from '@/lib/cerebras';
+    29→import { streamOpenAIChat, getOpenAIChatModelMapping, isOpenAIChatModel, OPENAI_API_KEY } from '@/lib/openai';
+    30→import { classifyContentQuality } from '@/lib/drive-rag';
+    31→import { processRAGQuery, uploadAndIndexLectures, hasLectureContext, getLecturesSummary, shouldUseRAG } from '@/lib/rag/rag-engine';
+    32→import { shouldInjectContentStrategy } from '@/lib/content-strategy-prompt';
+    33→import { isFileGenerationIntent, isQuizIntent } from '@/lib/chat-utils';
+    34→import { extractMemories } from '@/lib/user-memory.service';
+    35→import { extractTextFromPdfBase64, extractPdfWithVlmAndText, extractTextFromDocxBase64 } from '@/lib/pdf-text-extractor';
+    36→import { preprocessMediaAttachments, type ParsedMediaAttachment } from '@/lib/media-preprocessor';
+    37→import { reportSuccess as reportAggregatorSuccess, reportFailure as reportAggregatorFailure } from '@/lib/api-aggregator/reporter';
+    38→import { resolveHFModelId } from '@/lib/hf-model-resolve';
+    39→import { isModelDisabled } from '@/lib/disabled-models';
+    40→
+    41→// ─── Extracted utilities from @/lib/chat/ ─────────────────────────────
+    42→import { isProviderHealthy, markProviderFailed } from '@/lib/chat/provider-health';
+    43→import { parseFileAttachments, type ParsedAttachment } from '@/lib/chat/attachment-parser';
+    44→import { detectInlineMediaGenIntent } from '@/lib/chat/media-intent';
+    45→import { containsHtmlTags, stripHtmlToMarkdown, stripHtmlChunk, markdownToSimpleHTML } from '@/lib/chat/html-sanitizer';
+    46→import { FALLBACK_RESPONSE, buildSystemPrompt } from '@/lib/chat/system-prompt-builder';
+    47→import { classifyDocIntent, hasDocIntent, type DocIntent, type DocIntentType } from '@/lib/chat/doc-intent-classifier';
+    48→import { processSmartDocV2, type SmartDocV2Input } from '@/lib/chat/smart-doc-v2';
+    49→
+    50→/**
+    51→ * Build the messages array for the LLM, handling multimodal content for images.
+    52→ */
+    53→async function buildLLMMessages(
+    54→  systemPrompt: string,
+    55→  conversationMessages: { role: string; content: string }[],
+    56→  userMessage: string,
+    57→  parsed: { cleanedMessage: string; attachments: ParsedAttachment[]; hasAttachments: boolean },
+    58→  glmModel: string,
+    59→  modelConfig: { provider: string; capabilities: { vision: boolean } }
+    60→): Promise<Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }>> {
+    61→  const isVisionModel = glmModel === 'glm-4v-flash' || glmModel === 'glm-4v' || glmModel === 'glm-4-flash' || (modelConfig.provider === 'gemini' && modelConfig.capabilities.vision) || (modelConfig.provider === 'zhipuai' && modelConfig.capabilities.vision);
+    62→  const imageAttachments = parsed.attachments.filter((a) => a.type === 'image');
+    63→  const pdfAttachments = parsed.attachments.filter((a) => a.type === 'pdf');
+    64→  const docxAttachments = parsed.attachments.filter((a) => a.type === 'docx');
+    65→
+    66→  // Build the user message content
+    67→  let finalUserMessage = parsed.cleanedMessage;
+    68→
+    69→  // For PDFs, extract text and append it
+    70→  if (pdfAttachments.length > 0) {
+    71→    const pdfTexts = await Promise.all(
+    72→      pdfAttachments.map(async (pdf) => {
+    73→        const extractedText = await extractPdfWithVlmAndText(pdf.content!, pdf.name);
+    74→        const contentQuality = classifyContentQuality(extractedText);
+    75→        if (contentQuality === 'failed') {
+    76→          return `📄 ملف PDF مرفق: ${pdf.name} (${pdf.size})\n⚠️ ${extractedText}\n⚠️ مهم: لا تخترع أي محتوى عن هذا الملف — لم يتم قراءته بنجاح. أخبر المستخدم بذلك بصراحة.`;
+    77→        }
+    78→        if (contentQuality === 'partial') {
+    79→          // Extract usable content after the failure marker
+    80→          const firstBracketEnd = extractedText.indexOf(']\n');
+    81→          const usableText = firstBracketEnd > 0 ? extractedText.slice(firstBracketEnd + 2).trim() : extractedText;
+    82→          return `📄 ملف PDF مرفق: ${pdf.name} (${pdf.size})\n⚠️ محتوى جزئي — بعض الصفحات لم يتم قراءتها بشكل صحيح\n--- محتوى PDF ---\n${usableText}\n--- نهاية المحتوى ---`;
+    83→        }
+    84→        return `📄 ملف PDF مرفق: ${pdf.name} (${pdf.size})\n--- محتوى PDF ---\n${extractedText}\n--- نهاية المحتوى ---`;
+    85→      })
+    86→    );
+    87→    finalUserMessage = pdfTexts.join('\n\n') + (finalUserMessage ? '\n\n' + finalUserMessage : '');
+    88→  }
+    89→
+    90→  // For DOCX (Word) files, extract text via mammoth and append it
+    91→  if (docxAttachments.length > 0) {
+    92→    const docxTexts = await Promise.all(
+    93→      docxAttachments.map(async (docx) => {
+    94→        try {
+    95→          const extractedText = await extractTextFromDocxBase64(docx.content!, 100 * 1024);
+    96→          if (!extractedText || extractedText.length < 10) {
+    97→            return `📄 ملف Word مرفق: ${docx.name} (${docx.size})\n⚠️ لم يتم استخراج نص من الملف. أخبر المستخدم بذلك بصراحة.`;
+    98→          }
+    99→          return `📄 ملف Word مرفق: ${docx.name} (${docx.size})\n--- محتوى الملف ---\n${extractedText}\n--- نهاية المحتوى ---`;
+   100→        } catch (err) {
+   101→          return `📄 ملف Word مرفق: ${docx.name} (${docx.size})\n⚠️ خطأ في قراءة الملف: ${err instanceof Error ? err.message : String(err)}`;
+   102→        }
+   103→      })
+   104→    );
+   105→    finalUserMessage = docxTexts.join('\n\n') + (finalUserMessage ? '\n\n' + finalUserMessage : '');
+   106→  }
+   107→
+   108→  // If we have images and a vision model, construct multimodal messages
+   109→  if (imageAttachments.length > 0 && isVisionModel) {
+   110→    // Build multimodal content array
+   111→    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+   112→
+   113→    // Add text content first
+   114→    if (finalUserMessage) {
+   115→      contentParts.push({ type: 'text', text: finalUserMessage });
+   116→    }
+   117→
+   118→    // Add each image
+   119→    for (const img of imageAttachments) {
+   120→      contentParts.push({
+   121→        type: 'image_url',
+   122→        image_url: { url: img.content! },
+   123→      });
+   124→    }
+   125→
+   126→    return [
+   127→      { role: 'system', content: systemPrompt },
+   128→      ...conversationMessages,
+   129→      { role: 'user', content: contentParts },
+   130→    ];
+   131→  }
+   132→
+   133→  // For non-vision models with images, add a text description note
+   134→  if (imageAttachments.length > 0 && !isVisionModel) {
+   135→    // ── Media Preprocessor: Enhanced media analysis ──
+   136→    // If media preprocessing is available, use it for richer content analysis
+   137→    // This enables ALL models to understand images, videos, and audio
+   138→    // through preprocessing with vision/ASR services.
+   139→    try {
+   140→      const mediaAttachments: ParsedMediaAttachment[] = imageAttachments.map((img) => ({
+   141→        type: 'image' as const,
+   142→        name: img.name,
+   143→        size: img.size,
+   144→        content: img.content,
+   145→      }));
+   146→      const preprocessed = await preprocessMediaAttachments(
+   147→        mediaAttachments,
+   148→        finalUserMessage,
+   149→        false, // not a vision model
+   150→        'ar'
+   151→      );
+   152→      if (preprocessed.combinedText.trim()) {
+   153→        finalUserMessage = preprocessed.combinedText + (finalUserMessage ? '\n\n' + finalUserMessage : '');
+   154→      }
+   155→    } catch (mediaPreprocessErr) {
+   156→      // Fallback: tell the user to switch to a vision model
+   157→      console.warn('[Chat] Media preprocessor failed, using fallback note:', mediaPreprocessErr instanceof Error ? mediaPreprocessErr.message : String(mediaPreprocessErr));
+   158→      const imageNote = imageAttachments
+   159→        .map((img) => `📷 صورة مرفقة: ${img.name} (${img.size}) - تم إرفاق صورة لكن النموذج الحالي لا يدعم تحليل الصور. يرجى التبديل لنموذج Delta Vision لتحليل الصور.`)
+   160→        .join('\n');
+   161→      finalUserMessage = imageNote + (finalUserMessage ? '\n\n' + finalUserMessage : '');
+   162→    }
+   163→  }
+   164→
+   165→  // Standard text-only messages
+   166→  return [
+   167→    { role: 'system', content: systemPrompt },
+   168→    ...conversationMessages,
+   169→    { role: 'user', content: finalUserMessage },
+   170→  ];
+   171→}
+   172→
+   173→
+   174→
+   175→// ─── POST Handler ────────────────────────────────────────────────────
+   176→export async function POST(request: NextRequest) {
+   177→  // ── Rate limiting for chat stream (most resource-intensive endpoint) ──
+   178→  const { checkRateLimit, RATE_LIMIT_PRESETS } = await import('@/lib/rate-limit');
+   179→  const rateLimitResponse = checkRateLimit(request, RATE_LIMIT_PRESETS.ai);
+   180→  if (rateLimitResponse) return rateLimitResponse;
+   181→
+   182→  let connectionId = '';
+   183→  try {
+   184→    const body = await request.json();
+   185→    const { message, model, language, conversationId, autoSearch, forceSearch, systemPromptMode } = body as {
+   186→      message: string;
+   187→      model: string;
+   188→      language: string;
+   189→      conversationId?: string;
+   190→      autoSearch?: boolean;
+   191→      forceSearch?: boolean;
+   192→      systemPromptMode?: 'full' | 'open';
+   193→    };
+   194→
+   195→    // Validate required fields
+   196→    if (!message || !model) {
+   197→      return new Response(
+   198→        JSON.stringify({ error: 'الرسالة والنموذج مطلوبان' }),
+   199→        { status: 400, headers: { 'Content-Type': 'application/json' } }
+   200→      );
+   201→    }
+   202→
+   203→    // ── MCP Tools Integration ──
+   204→    // اكتشف نية المستخدم وشغّل أداة MCP لو محتاجة
+   205→    // قبل ما نبعت لـ GLM
+   206→    // CRITICAL: Skip MCP detection if message contains image/file attachments
+   207→    // because base64 data can contain substrings like "acp" that falsely match
+   208→    // MCP tool patterns (e.g., agent-acp), intercepting the message and preventing
+   209→    // the image from reaching the vision pipeline.
+   210→    const hasEmbeddedAttachments = message.includes('[DELTA_IMAGE:') || message.includes('[DELTA_PDF:') || message.includes('[DELTA_DOCX:');
+   211→    
+   212→    if (!hasEmbeddedAttachments) {
+   213→      try {
+   214→        const { detectAndRunMCP, detectAndRunVision } = await import('@/lib/ai-tools/mcp-chat-integration');
+   215→        const mcpResult = await detectAndRunMCP(message);
+   216→
+   217→        if (mcpResult.matched && mcpResult.result) {
+   218→          console.log(`[Chat] MCP tool matched: ${mcpResult.tool}`);
+   219→          const mcpStream = new ReadableStream({
+   220→            async start(controller) {
+   221→              const encoder = new TextEncoder();
+   222→              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: mcpResult.result })}\n\n`));
+   223→              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   224→              controller.close();
+   225→            },
+   226→          });
+   227→          return new Response(mcpStream, {
+   228→            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   229→          });
+   230→        }
+   231→      } catch (mcpError) {
+   232→        console.warn('[Chat] MCP detection failed:', mcpError);
+   233→      }
+   234→    }
+   235→
+   236→    // ── Smart Ball Command Detection (Reversed Command Control) ──
+   237→    // لو المستخدم طلب تشغيل/إيقاف راديو، تحكم في جهاز، أو تفعيل مشهد مزاجي
+   238→    // نفّذ الأمر فوراً عبر control-engine وأرجع تأكيد
+   239→    if (!hasEmbeddedAttachments) {
+   240→      try {
+   241→        const { detectSmartBallCommand } = await import('@/lib/anzaro-smart-ball-detector');
+   242→        const ballCommand = await detectSmartBallCommand(message);
+   243→        if (ballCommand) {
+   244→          console.log(`[Chat] Smart Ball command detected: ${ballCommand.type}`);
+   245→          const ballStream = new ReadableStream({
+   246→            async start(controller) {
+   247→              const encoder = new TextEncoder();
+   248→              // sink accepts either a string (text content) or an object (structured SSE event)
+   249→              const sink = (data: string | Record<string, unknown>) => {
+   250→                if (typeof data === 'string') {
+   251→                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: data })}\n\n`));
+   252→                } else {
+   253→                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+   254→                }
+   255→              };
+   256→              try {
+   257→                await ballCommand.execute(sink);
+   258→              } catch (e: any) {
+   259→                sink(`\n\n❌ خطأ: ${e.message}`);
+   260→              } finally {
+   261→                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   262→                controller.close();
+   263→              }
+   264→            },
+   265→          });
+   266→          return new Response(ballStream, {
+   267→            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   268→          });
+   269→        }
+   270→      } catch (ballError) {
+   271→        console.warn('[Chat] Smart Ball detection failed:', ballError);
+   272→      }
+   273→    }
+   274→
+   275→    // ── Intent Detection (Script Writer + Content Studio) ──
+   276→    // لو المستخدم طلب سكريبت أو حزمة محتوى، حوّل للأداة المناسبة
+   277→    try {
+   278→      const { detectIntent } = await import('@/lib/intent/router');
+   279→      const intent = detectIntent(message);
+   280→      if (intent.matched && intent.confidence === 'high') {
+   281→        console.log(`[Chat] Intent matched: ${intent.tool} — ${intent.contentType} — topic: ${intent.topic}`);
+   282→
+   283→        const isContentStudio = intent.tool === 'content-studio';
+   284→        const moduleName = isContentStudio ? '@/lib/content-studio/engine' : '@/lib/scriptwriter/engine';
+   285→        const funcName = isContentStudio ? 'generateContentPackage' : 'generateScript';
+   286→        const importedModule: any = await import(moduleName);
+   287→        const generator = importedModule[funcName];
+   288→
+   289→        const toolStream = new ReadableStream({
+   290→          async start(controller) {
+   291→            const encoder = new TextEncoder();
+   292→            const sink = (event: any) => {
+   293→              if (event.type === 'token') {
+   294→                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: event.content })}\n\n`));
+   295→              } else if (event.type === 'done') {
+   296→                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   297→              } else if (event.type === 'error') {
+   298→                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '\n\n❌ خطأ: ' + event.error })}\n\n`));
+   299→                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   300→              }
+   301→              // status/thinking/studio_done/script_done events silently dropped (HF stream format)
+   302→            };
+   303→            try {
+   304→              await generator({
+   305→                topic: intent.topic || message,
+   306→                contentType: intent.contentType || 'reel',
+   307→                language: 'ar',
+   308→              }, sink);
+   309→            } catch (e: any) {
+   310→              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '\n\n❌ خطأ: ' + e.message })}\n\n`));
+   311→              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   312→            } finally {
+   313→              controller.close();
+   314→            }
+   315→          },
+   316→        });
+   317→
+   318→        return new Response(toolStream, {
+   319→          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   320→        });
+   321→      }
+   322→    } catch (intentError) {
+   323→      console.warn('[Chat] Intent detection failed:', intentError);
+   324→    }
+   325→
+   326→    // ── Media Intent Detection (Radio / Spotify / YouTube / TTS) ──
+   327→    // CONTEXT-BASED detection: uses a fast LLM call to understand the user's
+   328→    // INTENT from natural Arabic phrasing — not keyword-regex matching.
+   329→    //
+   330→    // This handles phrases like:
+   331→    //   "شغللي آخر حاجة القناة دي نزلتها"  → youtube (no keyword "فيديو")
+   332→    //   "سمعني اللي كان طالع"              → youtube (context: was playing)
+   333→    //   "خليني أسمع حاجة هادية"             → radio (context: calm)
+   334→    //
+   335→    // Falls back to regex ONLY if the LLM call fails (network/timeout).
+   336→    try {
+   337→      const { detectMediaIntentLLM, detectMediaIntentRegex } = await import('@/lib/ai-tools/media-intent-llm');
+   338→
+   339→      // Try LLM-based detection first (context-aware)
+   340→      let intent = await detectMediaIntentLLM(message);
+   341→
+   342→      // Fallback to regex if LLM failed
+   343→      if (!intent.wantsMedia && !intent.source) {
+   344→        const fallback = detectMediaIntentRegex(message);
+   345→        if (fallback.wantsMedia) {
+   346→          console.log('[Chat] LLM detection failed, regex fallback triggered');
+   347→          intent = fallback;
+   348→        }
+   349→      }
+   350→
+   351→      // ── V.15: STOP media intent — send stopMedia SSE event ──
+   352→      if (intent.wantsMedia && intent.action === 'stop') {
+   353→        console.log('[Chat] Media STOP intent detected');
+   354→        const stopStream = new ReadableStream({
+   355→          async start(controller) {
+   356→            const encoder = new TextEncoder();
+   357→            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: 'تمام، اتقفل 🔇' })}\n\n`));
+   358→            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ stopMedia: true })}\n\n`));
+   359→            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   360→            controller.close();
+   361→          },
+   362→        });
+   363→        return new Response(stopStream, {
+   364→          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   365→        });
+   366→      }
+   367→
+   368→      if (intent.wantsMedia && intent.source && intent.source !== 'tts') {
+   369→        console.log(`[Chat] Media intent (LLM): source=${intent.source}, query="${(intent.query || message).slice(0, 60)}", confidence=${intent.confidence || 0}`);
+   370→
+   371→        // Call play-media API internally
+   372→        const mediaResponse = await fetch('http://localhost:3000/api/ai/play-media', {
+   373→          method: 'POST',
+   374→          headers: { 'Content-Type': 'application/json' },
+   375→          body: JSON.stringify({ query: intent.query || message, source: intent.source }),
+   376→          signal: AbortSignal.timeout(15_000),
+   377→        });
+   378→
+   379→        if (mediaResponse.ok) {
+   380→          const mediaData = await mediaResponse.json();
+   381→          if (mediaData.mediaWidget) {
+   382→            console.log(`[Chat] Media widget ready: source=${mediaData.mediaWidget.source}, title="${mediaData.mediaWidget.title}"`);
+   383→
+   384→            // Return SSE stream with text + mediaWidget
+   385→            const mediaStream = new ReadableStream({
+   386→              async start(controller) {
+   387→                const encoder = new TextEncoder();
+   388→                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: mediaData.content })}\n\n`));
+   389→                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ mediaWidget: mediaData.mediaWidget })}\n\n`));
+   390→                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   391→                controller.close();
+   392→              },
+   393→            });
+   394→
+   395→            return new Response(mediaStream, {
+   396→              headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   397→            });
+   398→          }
+   399→        }
+   400→      }
+   401→    } catch (mediaError) {
+   402→      console.warn('[Chat] Media detection failed:', mediaError);
+   403→    }
+   404→
+   405→    // ── HuggingFace Chat Model Bridge ──
+   406→    let modelConfig = getModelById(model);
+   407→    let isHFDirectModel = false;
+   408→    let hfDirectModelId: string | null = null;
+   409→
+   410→    if (!modelConfig && model?.startsWith('hf-chat:')) {
+   411→      hfDirectModelId = model.slice(8); // Strip 'hf-chat:' prefix
+   412→
+   413→      // Check if model is disabled by admin
+   414→      if (await isModelDisabled(hfDirectModelId)) {
+   415→        return new Response(
+   416→          JSON.stringify({ error: `النموذج "${hfDirectModelId}" معطل من قبل الآدمن` }),
+   417→          { status: 403, headers: { 'Content-Type': 'application/json' } }
+   418→        );
+   419→      }
+   420→
+   421→      const hfEntry = getChatModelById(hfDirectModelId);
+   422→      if (hfEntry) {
+   423→        // Create a synthetic modelConfig for the HF model
+   424→        modelConfig = {
+   425→          id: model,
+   426→          name: hfEntry.name || hfDirectModelId,
+   427→          nameEn: hfEntry.shortName || hfDirectModelId,
+   428→          icon: '🤗',
+   429→          category: 'hf-chat' as any,
+   430→          glmModel: 'glm-4-flash',
+   431→          provider: 'huggingface',
+   432→          realChatModel: hfDirectModelId,
+   433→          realImageModel: '',
+   434→          realVideoModel: '',
+   435→          rank: 'standard',
+   436→          description: hfEntry.name || hfDirectModelId,
+   437→          descriptionEn: hfEntry.shortName || hfDirectModelId,
+   438→          systemPrompt: '',
+   439→          hfChatModel: hfDirectModelId,
+   440→          supportsPdf: false,
+   441→          openSource: true,
+   442→          skills: [],
+   443→          capabilities: {
+   444→            chat: true, vision: false, imageGeneration: false, videoGeneration: false,
+   445→            codeGeneration: true, pdfAnalysis: false, webSearch: false, audioTTS: false,
+   446→            functionCalling: false, reasoning: false, rag: false, largeContext: false,
+   447→            translation: true, summarization: true, maxContextTokens: 8192,
+   448→            inputModalities: ['text'], outputModalities: ['text'],
+   449→          },
+   450→        };
+   451→        isHFDirectModel = true;
+   452→        console.log(`[Chat] HF direct model detected: ${hfDirectModelId} — routing to HuggingFace chat service`);
+   453→      }
+   454→    }
+   455→
+   456→    // ── Custom Model Bridge (from Aggregator) ──
+   457→    // When user selects custom:chat:ID, fetch the custom model config from DB
+   458→    let customModelConfig: {
+   459→      baseUrl: string;
+   460→      apiKey: string | null;
+   461→      authType: string;
+   462→      authHeader: string | null;
+   463→      apiFormat: string;
+   464→      modelId: string | null;
+   465→    } | null = null;
+   466→
+   467→    if (!modelConfig && model?.startsWith('custom:chat:')) {
+   468→      const customModelId = model.split(':').slice(2).join(':');
+   469→      try {
+   470→        const customModel = await db.customModel.findUnique({ where: { id: customModelId } });
+   471→        if (customModel && customModel.isActive) {
+   472→          // Resolve short HF model IDs to full paths
+   473→          const resolvedModelId = resolveHFModelId(customModel.modelId) || customModel.modelId || customModel.nameEn;
+   474→
+   475→          // خمن الـ maxTokens لو مش متاح في الـ DB
+   476→          const { estimateMaxTokens } = await import('@/lib/hf-chat.service');
+   477→          const customMaxTokens = (customModel as any).maxTokens || estimateMaxTokens(resolvedModelId);
+   478→
+   479→          modelConfig = {
+   480→            id: model,
+   481→            name: customModel.name,
+   482→            nameEn: customModel.nameEn,
+   483→            icon: customModel.icon || '⚡',
+   484→            category: 'hf-chat' as any,
+   485→            glmModel: 'glm-4-flash',
+   486→            provider: (customModel.provider || 'huggingface') as any,
+   487→            realChatModel: resolvedModelId,
+   488→            realImageModel: '',
+   489→            realVideoModel: '',
+   490→            rank: 'standard',
+   491→            description: customModel.description || customModel.name,
+   492→            descriptionEn: customModel.descriptionEn || customModel.nameEn,
+   493→            systemPrompt: `أنت ${customModel.name} — مساعد ذكي على منصة Anzaro AI.\n\n═══ اللهجة (مهم جداً) ═══\nاتكلم بالعامية المصرية الفلّاحة الشرقاوي (محافظة الشرقية). خفيف، عربجي، وواضح. ممنوع فصحى إلا لو المستخدم طلبها.\nاستخدم: "يا حبيبي" لو المستخدم ولد، "يا حبيبتي" لو المستخدم بنت. لو مش متأكد استخدم "يا حبيبي".\nعبارات شائعة: "خلي بالك"، "بصّ يا حبيبي"، "والله يا حبيبي"، "يا نهار"، "إيه الأخبار يا حبيبي"، "اعمل حسابك".\nتكلم زي الفلّاحة في الشرقية — بسيط، طبيعي، بس بذكاء وبتعرف شغلك كويس.`,
+   494→            supportsPdf: false,
+   495→            openSource: true,
+   496→            maxTokens: customMaxTokens,
+   497→            skills: [],
+   498→            capabilities: {
+   499→              chat: true, vision: false, imageGeneration: false, videoGeneration: false,
+   500→              codeGeneration: true, pdfAnalysis: false, webSearch: false, audioTTS: false,
+   501→              functionCalling: false, reasoning: false, rag: false, largeContext: customMaxTokens >= 100000,
+   502→              translation: true, summarization: true, maxContextTokens: customMaxTokens,
+   503→              inputModalities: ['text'], outputModalities: ['text'],
+   504→            },
+   505→          };
+   506→          isHFDirectModel = true;
+   507→          hfDirectModelId = resolvedModelId;
+   508→          customModelConfig = {
+   509→            baseUrl: customModel.baseUrl,
+   510→            apiKey: customModel.apiKey,
+   511→            authType: customModel.authType,
+   512→            authHeader: customModel.authHeader,
+   513→            apiFormat: customModel.apiFormat,
+   514→            modelId: resolvedModelId,
+   515→          };
+   516→          console.log(`[Chat] Custom model detected: ${customModel.name} (${customModel.provider}) modelId=${resolvedModelId} — routing via custom endpoint`);
+   517→        }
+   518→      } catch (err) {
+   519→        console.warn('[Chat] Failed to load custom model:', err);
+   520→      }
+   521→    }
+   522→
+   523→    // ── Reject image/video-only models in chat context ──
+   524→    // These models are for media generation, not chat
+   525→    if (!modelConfig && (model?.startsWith('hf-image:') || model?.startsWith('hf-video:') || model?.startsWith('custom:image:') || model?.startsWith('custom:video:'))) {
+   526→      const isImage = model.includes('image');
+   527→      const categoryLabel = isImage ? 'توليد الصور' : 'توليد الفيديو';
+   528→      return new Response(
+   529→        JSON.stringify({ error: `هذا النموذج مخصص لـ${categoryLabel} وليس للشات. اختر نموذج شات من القائمة.` }),
+   530→        { status: 400, headers: { 'Content-Type': 'application/json' } }
+   531→      );
+   532→    }
+   533→
+   534→    if (!modelConfig) {
+   535→      return new Response(
+   536→        JSON.stringify({ error: 'النموذج غير موجود' }),
+   537→        { status: 400, headers: { 'Content-Type': 'application/json' } }
+   538→      );
+   539→    }
+   540→
+   541→    // Parse file attachments from the message
+   542→    const parsed = parseFileAttachments(message);
+   543→
+   544→    // ── Vision Tools Integration ──
+   545→    // لو فيه صور مرفقة، شغّل أداة vision قبل GLM
+   546→    const imageAttachments = parsed.attachments.filter((a) => a.type === 'image');
+   547→    if (imageAttachments.length > 0) {
+   548→      try {
+   549→        const { detectAndRunVision } = await import('@/lib/ai-tools/mcp-chat-integration');
+   550→        // خد أول صورة
+   551→        const firstImage = imageAttachments[0];
+   552→        const imageBase64 = firstImage.content?.startsWith('data:') ? firstImage.content : `data:image/png;base64,${firstImage.content}`;
+   553→        const visionResult = await detectAndRunVision(parsed.cleanedMessage || 'حلل الصورة دي', imageBase64);
+   554→
+   555→        if (visionResult.matched && visionResult.result) {
+   556→          console.log(`[Chat] Vision tool matched: ${visionResult.tool}`);
+   557→          const visionStream = new ReadableStream({
+   558→            async start(controller) {
+   559→              const encoder = new TextEncoder();
+   560→              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: visionResult.result })}\n\n`));
+   561→              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   562→              controller.close();
+   563→            },
+   564→          });
+   565→          return new Response(visionStream, {
+   566→            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+   567→          });
+   568→        }
+   569→      } catch (visionError) {
+   570→        console.warn('[Chat] Vision detection failed:', visionError);
+   571→      }
+   572→    }
+   573→
+   574→    // Optional auth — guest mode if no token
+   575→    const authHeader = request.headers.get('authorization');
+   576→    const token = extractBearerToken(authHeader);
+   577→    const user = token ? await getUserFromToken(token) : null;
+   578→
+   579→    // ── Max tokens cap REMOVED per user request ──
+   580→    // Previously: PLATFORM_MAX_TOKENS + userMaxTokens capped responses at 60K,
+   581→    // causing harmful truncation. Now we do NOT pass max_tokens to providers
+   582→    // at all — each provider uses its own default maximum, so responses are
+   583→    // never artificially cut off. The DB maxTokens field is retained for
+   584→    // backward compatibility but no longer enforced.
+   585→
+   586→    // ── Guest mode: rate limiting مرفوع (عبس طلب كده) ──
+   587→    if (!user) {
+   588→      const { checkRateLimit } = await import('@/lib/rate-limit');
+   589→      const guestLimit = checkRateLimit(request, { maxRequests: 100, windowMs: 60 * 1000, keyPrefix: 'chat-guest' });
+   590→      if (guestLimit) return guestLimit;
+   591→    }
+   592→
+   593→    // ── Enhanced Document Intent Detection (FAST — regex only, no LLM) ──
+   594→    // Runs BEFORE system prompt build so we can pass docIntent to the builder,
+   595→    // which uses it to decide whether to inject CONTENT_STRATEGY_PROMPT or
+   596→    // the MARKDOWN-ONLY rule.
+   597→    //
+   598→    // SMART ROUTING: We now classify with hasAttachments=true more liberally.
+   599→    // When the user's message IMPLIES file generation (e.g., "لخص القوانين",
+   600→    // "اجمع المحاضرات"), we treat it as if there are attachments because
+   601→    // the structured output naturally maps to a file/document.
+   602→    // The classifyDocIntent function internally checks both explicit and
+   603→    // implicit file generation patterns.
+   604→    const docIntent = classifyDocIntent(message, parsed.hasAttachments || isFileGenerationIntent(message));
+   605→    const hasEnhancedDocIntent = docIntent !== null && docIntent.type !== 'chat-only' && docIntent.type !== 'quiz';
+   606→
+   607→    // ── Build system prompt using extracted module ──
+   608→    // All system prompt construction (language, capabilities, time context,
+   609→    // content strategy, design prefs, attachments, emotion, memory, Drive, web search)
+   610→    // is now encapsulated in buildSystemPrompt() for maintainability.
+   611→    const promptResult = await buildSystemPrompt({
+   612→      model,
+   613→      modelConfig,
+   614→      language,
+   615→      systemPromptMode,
+   616→      message,
+   617→      parsed,
+   618→      user,
+   619→      autoSearch,
+   620→      forceSearch,
+   621→      docIntent,
+   622→    });
+   623→    let systemPrompt = promptResult.systemPrompt;
+   624→    const emotion = promptResult.emotion;
+   625→    const isOpenMode = promptResult.isOpenMode;
+   626→    const searchResults = promptResult.searchResults;
+   627→    const searchPerformed = promptResult.searchPerformed;
+   628→
+   629→    // ── Personality Profile Injection (Smart Ball Adaptive Mirroring) ──
+   630→    // لو المستخدم عمل personality onboarding، حقن الـ user_personality.md
+   631→    // في الـ system prompt عشان الـ AI يكيّف نبرته ولهجته حسب شخصية المستخدم
+   632→    if (user?.id) {
+   633→      try {
+   634→        const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } });
+   635→        if (profile) {
+   636→          const personalityAddon = `\n\n═══ ملف شخصية المستخدم (user_personality.md) ═══\n${profile.markdown}\n\n═══ توجيهات التكيّف ═══\n- نوع الشخصية: ${profile.personaType}\n- اللهجة المفضلة: ${profile.dialect}\n- القيادة: ${profile.leadership}/100 | العناد: ${profile.stubbornness}/100 | التحليل: ${profile.analytical}/100\n- عدّل نبرتك لتكمل شخصية المستخدم — لو قائد، كون مختصر وحاسم؛ لو عاطفي، كون داعم ودافي.\n- ناديه باسم "${profile.name}" مرة واحدة كحد أقصى في الرد، كأخ أكبر ثقة.\n- ارفع عداد التفاعلات.`;
+   637→          systemPrompt += personalityAddon;
+   638→          // Increment interaction count (Phase 7.1 — adaptive memory)
+   639→          await db.personalityProfile.update({
+   640→            where: { userId: user.id },
+   641→            data: { interactionCount: { increment: 1 } },
+   642→          }).catch(() => {});
+   643→          console.log(`[Chat] Personality profile injected: ${profile.personaType}, interaction #${profile.interactionCount + 1}`);
+   644→        }
+   645→      } catch (profileError) {
+   646→        console.warn('[Chat] Personality profile injection failed:', profileError);
+   647→      }
+   648→    }
+   649→
+   650→    // ── RAG Context Injection ──
+   651→    // If the conversation has uploaded lectures, search them for relevant context
+   652→    // and inject it into the system prompt. This enables the AI to answer questions
+   653→    // about the 12 lectures without losing or forgetting any content.
+   654→    let ragContextUsed = false;
+   655→    if (conversationId) {
+   656→      try {
+   657→        const ragResult = await processRAGQuery(
+   658→          conversationId,
+   659→          message,
+   660→          (language as 'ar' | 'en') || 'ar',
+   661→          8 // top 8 most relevant chunks
+   662→        );
+   663→        if (ragResult.usedRAG && ragResult.context) {
+   664→          systemPrompt += ragResult.context;
+   665→          ragContextUsed = true;
+   666→          console.log(`[Chat] RAG context injected: ${ragResult.results.length} chunks, ${ragResult.context.length} chars`);
+   667→        } else if (hasLectureContext(conversationId)) {
+   668→          // Lectures exist but no specific RAG match — still inject summary
+   669→          const summary = getLecturesSummary(conversationId, (language as 'ar' | 'en') || 'ar');
+   670→          systemPrompt += summary;
+   671→          console.log(`[Chat] RAG summary injected (no specific match)`);
+   672→        }
+   673→      } catch (ragError) {
+   674→        console.warn('[Chat] RAG query failed (non-critical):', ragError instanceof Error ? ragError.message : String(ragError));
+   675→      }
+   676→    }
+   677→
+   678→    // ── Ensure we have a valid DB conversation (READ only — writes are deferred) ──
+   679→    // We read conversation history from DB here to build the context for the LLM.
+   680→    // The actual DB writes (conversation create + user message save) are deferred
+   681→    // to AFTER the stream starts, so the first token arrives faster.
+   682→    let dbConversationId: string | null = null;
+   683→    let conversationMessages: { role: string; content: string }[] = [];
+   684→
+   685→    if (conversationId && user) {
+   686→      try {
+   687→        const existingConv = await db.conversation.findUnique({
+   688→          where: { id: conversationId },
+   689→          include: { messages: { orderBy: { createdAt: 'asc' } } },
+   690→        });
+   691→
+   692→        if (existingConv && existingConv.userId === user.id) {
+   693→          dbConversationId = existingConv.id;
+   694→          const allMessages = existingConv.messages
+   695→            .filter((m) => m.role !== 'system')
+   696→            .map((m) => {
+   697→              let content = m.content;
+   698→              content = content.replace(/\[📷 صورة: [^\]]+\]/g, '[صورة مرفقة]');
+   699→              content = content.replace(/\[📄 PDF: [^\]]+\]/g, '[ملف PDF مرفق]');
+   700→              content = content.replace(/\[DELTA_IMAGE:data:image\/[^;\]]+;base64,[^\]]+\]/g, '[صورة]');
+   701→              content = content.replace(/\[DELTA_PDF:data:application\/pdf;base64,[^\]]+\]/g, '[ملف PDF]');
+   702→              return { role: m.role, content };
+   703→            });
+   704→
+   705→          // ── Conversation memory: send enough context so the model REMEMBERS ──
+   706→          // Previous limit was 12 messages + 2000-char truncation → model forgot
+   707→          // earlier context. Now we send the last 30 messages with smart truncation:
+   708→          // - Recent messages (last 10): full content (no truncation)
+   709→          // - Older messages (11-30): truncated to 4000 chars to save tokens
+   710→          // This keeps the full flow of recent conversation while preserving
+   711→          // enough history for the model to understand the topic.
+   712→          const recentCount = 10;
+   713→          const totalHistory = 30;
+   714→          const recent = allMessages.slice(-recentCount);
+   715→          const older = allMessages.slice(-totalHistory, -recentCount);
+   716→
+   717→          conversationMessages = [
+   718→            ...older.map(m => ({
+   719→              role: m.role,
+   720→              content: m.content.length > 4000 ? m.content.slice(0, 4000) + '...' : m.content,
+   721→            })),
+   722→            ...recent.map(m => ({
+   723→              role: m.role,
+   724→              content: m.content, // No truncation for recent messages
+   725→            })),
+   726→          ];
+   727→        } else {
+   728→          console.warn(`[Chat] Conversation ${conversationId} not found or not owned by user ${user.id}. Creating new conversation.`);
+   729→        }
+   730→      } catch (convError) {
+   731→        console.error('[Chat] Error loading conversation (will create new one inline):', convError);
+   732→      }
+   733→    }
+   734→
+   735→    // ── Inline Media Generation Detection ──
+   736→    // If user wants to generate an image/video, we'll generate it in parallel
+   737→    // with the text response and include it in the stream
+   738→    const mediaGenIntent = detectInlineMediaGenIntent(parsed.cleanedMessage || message);
+   739→    const shouldGenerateImage = mediaGenIntent?.type === 'image';
+   740→    const shouldGenerateVideo = mediaGenIntent?.type === 'video';
+   741→
+   742→    // ── File Generation Intent Detection ──
+   743→    // In open mode, we also detect HTML output as a file generation intent
+   744→    const fileGenIntent = isFileGenerationIntent(message);
+   745→    // Will be updated during streaming if open mode detects HTML output
+   746→    let fileGenIntentOpen = fileGenIntent;
+   747→
+   748→    if (hasEnhancedDocIntent) {
+   749→      console.log(`[Chat] Enhanced Doc Intent detected — intent=${docIntent!.type}, topic=${docIntent!.topic || 'none'}, files=${parsed.attachments.length}, request="${message.slice(0, 80)}"`);
+   750→    }
+   751→
+   752→    if (mediaGenIntent) {
+   753→      console.log(`[Chat] Inline media gen detected: type=${mediaGenIntent.type}, prompt="${mediaGenIntent.prompt.slice(0, 60)}"`);
+   754→    }
+   755→
+   756→    // Modify system prompt for image generation requests
+   757→    if (shouldGenerateImage) {
+   758→      systemPrompt += '\n\n🎨 المستخدم طلب توليد صورة. صف الصورة المولدة بإيجاز ثم أخبره أن الصورة تظهر أدناه. لا تقل "لا أستطيع توليد صور" — الصورة يتم توليدها بالفعل!';
+   759→    }
+   760→    if (shouldGenerateVideo) {
+   761→      systemPrompt += '\n\n🎬 المستخدم طلب توليد فيديو. صف الفيديو المولد بإيجاز. لا تقل "لا أستطيع توليد فيديو" — الفيديو يتم توليده!';
+   762→    }
+   763→
+   764→    // ── Quiz Intent Detection ──
+   765→    // When user asks for questions/quiz, auto-generate quiz
+   766→    // and emit a quizData event in the stream so the frontend opens the quiz dialog
+   767→    const hasQuizIntent = isQuizIntent(parsed.cleanedMessage || message);
+   768→    const hasPdfAttachments = parsed.attachments.some((a) => a.type === 'pdf');
+   769→    const hasTextAttachments = parsed.attachments.some((a) => a.type === 'text');
+   770→    const hasFileAttachments = hasPdfAttachments || hasTextAttachments;
+   771→    // Generate quiz when there are file attachments OR when quiz intent is very explicit
+   772→    // NOTE: Quiz generation is stateless (each request is independent). Race conditions
+   773→    // can only occur if the frontend sends duplicate requests for the same message.
+   774→    // Frontend should handle deduplication (e.g., disable button while generating).
+   775→    const shouldGenerateQuiz = hasQuizIntent;
+   776→
+   777→    if (shouldGenerateQuiz) {
+   778→      console.log(`[Chat] Quiz intent detected — will auto-generate quiz (hasFiles=${hasFileAttachments})`);
+   779→      systemPrompt += hasFileAttachments
+   780→        ? '\n\n📝 المستخدم طلب أسئلة اختبار. أخبره بإيجاز أنك تعمل على إنشاء اختبار من الملفات المرفقة وسيظهر اختبار تلقائياً. لا تقل "لا أستطيع إنشاء أسئلة" — الأسئلة يتم توليدها بالفعل!'
+   781→        : '\n\n📝 المستخدم طلب أسئلة اختبار. أخبره بإيجاز أنك تعمل على إنشاء اختبار وسيظهر تلقائياً. لا تقل "لا أستطيع إنشاء أسئلة" — الأسئلة يتم توليدها بالفعل!';
+   782→    }
+   783→
+   784→    // ── Auto-index uploaded PDFs into RAG store ──
+   785→    // When user attaches PDF/text files in chat, automatically index them
+   786→    // so future questions can use RAG retrieval instead of relying on
+   787→    // the conversation context window (which forgets old content).
+   788→    if (conversationId && hasFileAttachments && parsed.attachments.length > 0) {
+   789→      // Run indexing in background — don't block the chat response
+   790→      const ragFiles = parsed.attachments
+   791→        .filter((a) => a.type === 'pdf' || a.type === 'text')
+   792→        .map((a) => ({
+   793→          name: a.name,
+   794→          content: a.type === 'pdf' ? (a.content || '') : (a.textContent || a.content || ''),
+   795→          type: a.type as 'pdf' | 'text',
+   796→          size: parseInt(a.size) || 0,
+   797→        }));
+   798→
+   799→      if (ragFiles.length > 0) {
+   800→        // Fire and forget — the user gets their chat response immediately,
+   801→        // and the RAG index builds in the background for future queries.
+   802→        (async () => {
+   803→          try {
+   804→            console.log(`[Chat] Auto-indexing ${ragFiles.length} file(s) for RAG...`);
+   805→            await uploadAndIndexLectures(conversationId, ragFiles);
+   806→            console.log(`[Chat] RAG auto-indexing complete for conversation ${conversationId}`);
+   807→          } catch (ragIndexErr) {
+   808→            console.warn('[Chat] RAG auto-indexing failed (non-critical):', ragIndexErr instanceof Error ? ragIndexErr.message : String(ragIndexErr));
+   809→          }
+   810→        })();
+   811→      }
+   812→    }
+   813→
+   814→    // Build messages array for LLM with multimodal support
+   815→    const messages = await buildLLMMessages(
+   816→      systemPrompt,
+   817→      conversationMessages,
+   818→      message,
+   819→      parsed,
+   820→      modelConfig.glmModel,
+   821→      modelConfig
+   822→    );
+   823→
+   824→    // Get GLM model
+   825→    const glmModel = modelConfig.glmModel;
+   826→
+   827→    // ── DEFERRED: DB writes (conversation create + user message save) ──
+   828→    // These are now fired off as a background promise AFTER the stream starts,
+   829→    // so the LLM response begins streaming before the DB writes complete.
+   830→    // This saves 100-500ms on every message (the time it takes to write to DB).
+   831→    //
+   832→    // ── Create conversation in DB SYNCHRONOUSLY (before streaming starts) ──
+   833→    // This is critical: the X-Conversation-Id response header must contain the
+   834→    // real DB conversation ID so the client can send it back on the next message.
+   835→    // Previously this was deferred (async IIFE) → header was empty → client never
+   836→    // sent conversationId back → model had no conversation history → "forgot".
+   837→    const dbMessageContent = parsed.cleanedMessage || message;
+   838→    if (!dbConversationId && user) {
+   839→      try {
+   840→        const newConv = await db.conversation.create({
+   841→          data: {
+   842→            title: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
+   843→            model,
+   844→            language: language || 'ar',
+   845→            userId: user.id,
+   846→          },
+   847→        });
+   848→        dbConversationId = newConv.id;
+   849→      } catch (createError) {
+   850→        console.error('[Chat] Error creating conversation:', createError);
+   851→      }
+   852→    }
+   853→
+   854→    // Save user message to DB (can be deferred — doesn't affect the header)
+   855→    const deferredDbWrites = (async () => {
+   856→      if (dbConversationId && user) {
+   857→        try {
+   858→          await db.message.create({
+   859→            data: {
+   860→              content: dbMessageContent.length > 10000
+   861→                ? dbMessageContent.slice(0, 10000) + '...'
+   862→                : dbMessageContent,
+   863→              role: 'user',
+   864→              model,
+   865→              emotion,
+   866→              language: language || 'ar',
+   867→              conversationId: dbConversationId,
+   868→              userId: user.id,
+   869→            },
+   870→          });
+   871→        } catch (msgError: any) {
+   872→          if (msgError?.code === 'P2003') {
+   873→            console.warn('[Chat] FK constraint on user message save, creating new conversation');
+   874→            try {
+   875→              const newConv = await db.conversation.create({
+   876→                data: {
+   877→                  title: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
+   878→                  model,
+   879→                  language: language || 'ar',
+   880→                  userId: user.id,
+   881→                },
+   882→              });
+   883→              dbConversationId = newConv.id;
+   884→              await db.message.create({
+   885→                data: {
+   886→                  content: dbMessageContent.length > 10000
+   887→                    ? dbMessageContent.slice(0, 10000) + '...'
+   888→                    : dbMessageContent,
+   889→                  role: 'user',
+   890→                  model,
+   891→                  emotion,
+   892→                  language: language || 'ar',
+   893→                  conversationId: dbConversationId,
+   894→                  userId: user.id,
+   895→                },
+   896→              });
+   897→            } catch (retryError) {
+   898→              console.error('[Chat] Retry user message save failed:', retryError);
+   899→            }
+   900→          } else {
+   901→            console.error('[Chat] Error saving user message:', msgError);
+   902→          }
+   903→        }
+   904→      }
+   905→    })();
+   906→
+   907→    // ── FIX H5: Await deferred DB writes before Smart Doc pipeline ──
+   908→    // The Smart Doc pipeline needs dbConversationId to exist for saving assets.
+   909→    // Previously, the DB writes ran in the background and the conversation ID
+   910→    // might not exist yet when the pipeline tried to save the asset.
+   911→    // We still start the stream first for perceived responsiveness, but ensure
+   912→    // the DB is ready before any document generation.
+   913→    let deferredDbReady = false;
+   914→    deferredDbWrites
+   915→      .then(() => { deferredDbReady = true; })
+   916→      .catch(() => { deferredDbReady = true; }); // Don't block on error
+   917→
+   918→    // ── Stream Response ──
+   919→    const encoder = new TextEncoder();
+   920→    let streamClosed = false;
+   921→    // PERF: Use array for O(1) append instead of O(n) string concatenation
+   922→    // String += creates new string every time → O(n²) for long responses
+   923→    const contentChunks: string[] = [];
+   924→    let accumulatedContent = ''; // Kept for compatibility, joined from chunks when needed
+   925→    const streamStartTime = Date.now();
+   926→
+   927→    // ── Pollinations Ad Stripping ──────────────────────────────────────
+   928→    // The free Pollinations text API appends a promotional ad to responses:
+   929→    //   "Support Pollinations.AI:\n\n🌸 Ad 🌸\nPowered by Pollinations.AI..."
+   930→    // We detect the ad boundary and only stream the clean content to the user.
+   931→    // `displayedCleanLength` tracks how many chars of clean content we've sent.
+   932→    let displayedCleanLength = 0;
+   933→    let adBoundaryIndex = -1; // once set, content beyond this is suppressed
+   934→    const POLLINATIONS_AD_MARKERS = [
+   935→      'Support Pollinations.AI',
+   936→      '🌸 Ad 🌸',
+   937→      'Powered by Pollinations.AI',
+   938→      'Pollinations.AI free text APIs',
+   939→      'Support our mission to keep AI accessible',
+   940→    ];
+   941→    function findAdBoundary(text: string): number {
+   942→      // Return the char index where the ad begins, or -1 if not found.
+   943→      for (const marker of POLLINATIONS_AD_MARKERS) {
+   944→        const idx = text.indexOf(marker);
+   945→        if (idx !== -1) return idx;
+   946→      }
+   947→      return -1;
+   948→    }
+   949→
+   950→    // PERF: Cache shouldInjectContentStrategy result — was being called 3 times per request
+   951→    const cachedContentStrategyNeeded = shouldInjectContentStrategy(message);
+   952→
+   953→    // Register connection for system monitoring
+   954→    connectionId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+   955→    try {
+   956→      registerConnection(connectionId, '/api/chat/stream');
+   957→    } catch (monitorErr) {
+   958→      console.warn('[Chat] registerConnection failed (non-critical):', monitorErr instanceof Error ? monitorErr.message : String(monitorErr));
+   959→    }
+   960→
+   961→    const stream = new ReadableStream({
+   962→      async start(controller) {
+   963→        try {
+   964→          // ── Smart Document Pipeline Interception ──
+   965→          // When user uploads files + requests compilation/extraction,
+   966→          // use the smart pipeline instead of normal chat.
+   967→          // This replicates the AI assistant's thinking process:
+   968→          // Parse → Understand → Extract → Compile → Design → Render PDF
+   969→          if (hasEnhancedDocIntent) {
+   970→            // ── FIX H5: Ensure DB writes complete before Smart Doc pipeline ──
+   971→            // The pipeline needs dbConversationId to exist for asset creation.
+   972→            if (!deferredDbReady) {
+   973→              try { await deferredDbWrites; } catch { /* DB write errors logged inside */ }
+   974→              deferredDbReady = true;
+   975→            }
+   976→            console.log(`[Chat] Routing to Enhanced Smart Doc V2 — intent=${docIntent!.type}, topic=${docIntent!.topic || 'none'}`);
+   977→            try {
+   978→              // Prepare files for the pipeline
+   979→              const pipelineFiles = parsed.attachments
+   980→                .filter((a) => a.type === 'pdf' || a.type === 'text')
+   981→                .map((a) => ({
+   982→                  name: a.name,
+   983→                  content: a.content || a.textContent || '',
+   984→                  textContent: a.textContent,
+   985→                  type: a.type as 'pdf' | 'text',
+   986→                  size: a.size,
+   987→                }));
+   988→
+   989→              if (pipelineFiles.length === 0) {
+   990→                // ═══════════════════════════════════════════════════════════════════
+   991→                // NO FILES ATTACHED but user explicitly requested a PDF/document!
+   992→                //
+   993→                // Check if the message itself contains lecture text (e.g., when
+   994→                // text was pre-extracted from PDFs and sent inline to avoid
+   995→                // crashing the server with large base64 payloads).
+   996→                // If the message has "=== <title> ===" sections, treat each
+   997→                // section as a virtual text attachment for Smart Doc V2.
+   998→                // ═══════════════════════════════════════════════════════════════════
+   999→                const messageHasSections = /===\s*.+?\s*===/.test(message);
+  1000→
+  1001→                if (messageHasSections && message.length > 5000) {
+  1002→                  // Parse the message into sections and create virtual text attachments
+  1003→                  const sectionRegex = /===\s*(.+?)\s*===\n([\s\S]*?)(?=====\s*.+?\s*===|$)/g;
+  1004→                  let match;
+  1005→                  const virtualFiles: Array<{ name: string; content: string; textContent: string; type: 'text'; size: string }> = [];
+  1006→                  while ((match = sectionRegex.exec(message)) !== null) {
+  1007→                    const sectionTitle = match[1].trim();
+  1008→                    const sectionContent = match[2].trim();
+  1009→                    if (sectionContent.length > 50) {
+  1010→                      virtualFiles.push({
+  1011→                        name: `${sectionTitle}.txt`,
+  1012→                        content: sectionContent,
+  1013→                        textContent: sectionContent,
+  1014→                        type: 'text',
+  1015→                        size: `${sectionContent.length}`,
+  1016→                      });
+  1017→                    }
+  1018→                  }
+  1019→
+  1020→                  if (virtualFiles.length > 0) {
+  1021→                    console.log(`[Chat] Smart Doc: Found ${virtualFiles.length} text sections in message — routing to Smart Doc V2 with virtual attachments`);
+  1022→                    // Route to Smart Doc V2 with virtual text files
+  1023→                    const intentLabel = 'تجميعة المحاضرات';
+  1024→                    controller.enqueue(
+  1025→                      encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'started', message: `🚀 جاري ${intentLabel}...\n📄 ${virtualFiles.length} محاضرات مرفقة\n⏱️ العملية بتاخد 1-3 دقايق...` })}\n\n`)
+  1026→                    );
+  1027→
+  1028→                    try {
+  1029→                      const result = await processSmartDocV2({
+  1030→                        message,
+  1031→                        attachments: virtualFiles,
+  1032→                        language: (language as 'ar' | 'en') || 'ar',
+  1033→                        channelName: 'بعقل هادي',
+  1034→                        userId: user?.id,
+  1035→                        intent: docIntent!,
+  1036→                      }, (stage, progress, msg, detail) => {
+  1037→                        controller.enqueue(
+  1038→                          encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage, progress, message: msg, detail } })}\n\n`)
+  1039→                        );
+  1040→                      });
+  1041→
+  1042→                      if (result.success) {
+  1043→                        controller.enqueue(
+  1044→                          encoder.encode(`data: ${JSON.stringify({
+  1045→                            smartDocResult: {
+  1046→                              success: true,
+  1047→                              fileUrl: result.fileUrl,
+  1048→                              fileName: result.fileName,
+  1049→                              durationMs: result.durationMs,
+  1050→                              docType: result.docType || 'pdf',
+  1051→                            }
+  1052→                          })}\n\n`)
+  1053→                        );
+  1054→                        controller.enqueue(
+  1055→                          encoder.encode(`data: ${JSON.stringify({ content: `✅ تم ${intentLabel} بنجاح!\n\n📄 **${result.fileName}**\n⏱️ الوقت: ${Math.round((result.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${result.fileUrl})\n\nتم تحليل ${virtualFiles.length} محاضرات وإنشاء المستند 🎨` })}\n\n`)
+  1056→                        );
+  1057→                      } else {
+  1058→                        controller.enqueue(
+  1059→                          encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'failed', message: result.error || 'فشل في إنشاء المستند' })}\n\n`)
+  1060→                        );
+  1061→                      }
+  1062→                      controller.close();
+  1063→                      return;
+  1064→                    } catch (vDocErr) {
+  1065→                      console.error('[Chat] Virtual doc Smart Doc V2 error:', vDocErr);
+  1066→                      controller.enqueue(
+  1067→                        encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'error', message: 'حدث خطأ في معالجة المستند' })}\n\n`)
+  1068→                      );
+  1069→                      // Fall through to normal chat
+  1070→                    }
+  1071→                  }
+  1072→                }
+  1073→
+  1074→                // No sections found or sections too short — use the local document pipeline
+  1075→                console.log('[Chat] Smart Doc: No files attached but doc intent detected — routing to generateLocalDocument (المسار الذكي)');
+  1076→
+  1077→                // Better topic extraction for messages with embedded lecture content
+  1078→                const firstLine = message.split('\n')[0].trim();
+  1079→                const docTopic = docIntent!.topic
+  1080→                  || firstLine.replace(/^(اعمل|ولد|أنشئ|اصنع|اكتب|حول|حفظ|اطبع|generate|create|make|export|convert|save|download)\s*/i, '').replace(/(لي?|لي?\s*)(ملف|مستند|pdf|document|file)\s*/i, '').replace(/(شامل|مفصل|كامل|تفصيلي)\s*/i, '').replace(/(للمحاضرات|محاضرات|المحاضرات)\s*/i, 'محاضرات ').trim()
+  1081→                  || 'ملخص المحاضرات';
+  1082→                const intentLabel = 'ملخص المحاضرات';
+  1083→                const topicSuffix = docTopic ? `: ${docTopic.slice(0, 50)}` : '';
+  1084→
+  1085→                controller.enqueue(
+  1086→                  encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'started', message: `🚀 جاري ${intentLabel}${topicSuffix}...\n⏱️ العملية بتاخد 30-60 ثانية...\n🎨 هيتولد PDF ملون واحترافي زي المسار الذكي!` })}\n\n`)
+  1087→                );
+  1088→
+  1089→                try {
+  1090→                  const { generateLocalDocument } = await import('@/lib/hf-document.service');
+  1091→                  // When message contains lecture content (=== sections or long text),
+  1092→                  // instruct the LLM to use it as the basis for the document
+  1093→                  const instructionsForLLM = message.length > 3000
+  1094→                    ? `المستخدم يطلب ملخص شامل للمحاضرات. فيما يلي محتوى المحاضرات المرجعي — التزم به ولا تضف معلومات من عندك:\n\n${message.slice(0, 50000)}`
+  1095→                    : message;
+  1096→                  const localResult = await generateLocalDocument({
+  1097→                    topic: docTopic,
+  1098→                    language: (language as 'ar' | 'en') || 'ar',
+  1099→                    instructions: instructionsForLLM,
+  1100→                    channelName: 'بعقل هادي',
+  1101→                    includeImages: false,
+  1102→                    styleDescription: undefined,
+  1103→                    progressCallback: (stage, progress, msg) => {
+  1104→                      controller.enqueue(
+  1105→                        encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage, progress, message: msg } })}\n\n`)
+  1106→                      );
+  1107→                    },
+  1108→                  });
+  1109→
+  1110→                  if (localResult && localResult.fileUrl) {
+  1111→                    controller.enqueue(
+  1112→                      encoder.encode(`data: ${JSON.stringify({
+  1113→                        smartDocResult: {
+  1114→                          success: true,
+  1115→                          fileUrl: localResult.fileUrl,
+  1116→                          fileName: localResult.fileName,
+  1117→                          durationMs: localResult.durationMs,
+  1118→                          docType: localResult.docType || 'pdf',
+  1119→                        }
+  1120→                      })}\n\n`)
+  1121→                    );
+  1122→
+  1123→                    // ── FIX H5: Derive proper serve URL and actual file metadata ──
+  1124→                    // localResult.fileUrl is the absolute file path (e.g., /home/.../download/uuid.pdf)
+  1125→                    // We need to extract the filename for the serve URL and get real file stats
+  1126→                    const localFileName = localResult.fileUrl.split('/').pop() || '';
+  1127→                    const localServeUrl = `/api/pdf/serve/${localFileName}`;
+  1128→
+  1129→                    // Get actual file size
+  1130→                    let localFileSize = 0;
+  1131→                    let localFilePath = localResult.fileUrl;
+  1132→                    try {
+  1133→                      const { statSync } = await import('fs');
+  1134→                      localFileSize = statSync(localResult.fileUrl).size;
+  1135→                    } catch {
+  1136→                      localFileSize = 0;
+  1137→                    }
+  1138→
+  1139→                    controller.enqueue(
+  1140→                      encoder.encode(`data: ${JSON.stringify({ content: `✅ تم إنشاء المستند بنجاح!\n\n📄 **${localResult.fileName}**\n⏱️ الوقت: ${Math.round((localResult.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${localServeUrl})\n\n🎨 تم إنشاء مستند ملون واحترافي باستخدام المسار الذكي!` })}\n\n`)
+  1141→                    );
+  1142→
+  1143→                    // Save to DB — with ACTUAL file path and size (was '' and 0)
+  1144→                    if (user) {
+  1145→                      try {
+  1146→                        await db.generativeAsset.create({
+  1147→                          data: {
+  1148→                            userId: user.id,
+  1149→                            type: 'pdf',
+  1150→                            title: localResult.fileName || 'smart-doc-local',
+  1151→                            prompt: message.slice(0, 200),
+  1152→                            filePath: localFilePath,
+  1153→                            fileSize: localFileSize,
+  1154→                            metadata: JSON.stringify({
+  1155→                              fileUrl: localServeUrl,
+  1156→                              mimeType: 'application/pdf',
+  1157→                              source: 'smart-doc-local-pipeline',
+  1158→                              intentType: docIntent!.type,
+  1159→                              topic: docTopic,
+  1160→                            }),
+  1161→                            model: 'local-pdf',
+  1162→                          },
+  1163→                        });
+  1164→                      } catch (dbErr) {
+  1165→                        console.warn('[Chat] Smart Doc Local: Failed to save generative asset:', dbErr instanceof Error ? dbErr.message : String(dbErr));
+  1166→                      }
+  1167→                    }
+  1168→
+  1169→                    controller.close();
+  1170→                    return;
+  1171→                  } else {
+  1172→                    console.warn('[Chat] Smart Doc Local: generateLocalDocument returned no fileUrl, falling back to chat');
+  1173→                    controller.enqueue(
+  1174→                      encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'failed', message: 'لم يتم إنشاء الملف، جاري الرد بشكل عادي...' })}\n\n`)
+  1175→                    );
+  1176→                    // Fall through to normal chat
+  1177→                  }
+  1178→                } catch (localDocErr) {
+  1179→                  console.error('[Chat] Smart Doc Local: generateLocalDocument error:', localDocErr);
+  1180→
+  1181→                  // ── Fallback: Try delta-ai space ──
+  1182→                  controller.enqueue(
+  1183→                    encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage: 'fallback', progress: 50, message: '🔄 جاري التجربة عبر مساحة توليد الملفات البديلة...' } })}\n\n`)
+  1184→                  );
+  1185→
+  1186→                  try {
+  1187→                    const { generateDocumentViaDeltaAISpace } = await import('@/lib/hf-document.service');
+  1188→                    const fallbackResult = await generateDocumentViaDeltaAISpace({
+  1189→                      topic: docTopic,
+  1190→                      language: (language as 'ar' | 'en') || 'ar',
+  1191→                      instructions: message.length > 3000 ? message.slice(0, 50000) : message,
+  1192→                      mode: 'local',
+  1193→                      channelName: 'بعقل هادي',
+  1194→                      progressCallback: (stage, progress, msg) => {
+  1195→                        controller.enqueue(
+  1196→                          encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage, progress, message: msg } })}\n\n`)
+  1197→                        );
+  1198→                      },
+  1199→                    });
+  1200→
+  1201→                    if (fallbackResult && fallbackResult.fileUrl) {
+  1202→                      // ── FIX: Derive proper serve URL from absolute file path ──
+  1203→                      const fbFileName = fallbackResult.fileUrl.split('/').pop() || '';
+  1204→                      const fbServeUrl = fbFileName ? `/api/pdf/serve/${fbFileName}` : fallbackResult.fileUrl;
+  1205→
+  1206→                      controller.enqueue(
+  1207→                        encoder.encode(`data: ${JSON.stringify({
+  1208→                          smartDocResult: {
+  1209→                            success: true,
+  1210→                            fileUrl: fbServeUrl,
+  1211→                            fileName: fallbackResult.fileName,
+  1212→                            durationMs: fallbackResult.durationMs,
+  1213→                            docType: fallbackResult.docType || 'pdf',
+  1214→                          }
+  1215→                        })}\n\n`)
+  1216→                      );
+  1217→                      controller.enqueue(
+  1218→                        encoder.encode(`data: ${JSON.stringify({ content: `✅ تم إنشاء المستند بنجاح (عبر مساحة دلتا البديلة)!\n\n📄 **${fallbackResult.fileName}**\n⏱️ الوقت: ${Math.round((fallbackResult.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${fbServeUrl})` })}\n\n`)
+  1219→                      );
+  1220→                      controller.close();
+  1221→                      return;
+  1222→                    }
+  1223→                  } catch (fallbackErr) {
+  1224→                    console.error('[Chat] Delta-AI space fallback also failed:', fallbackErr);
+  1225→                  }
+  1226→
+  1227→                  controller.enqueue(
+  1228→                    encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'error', message: 'حدث خطأ في التوليد الذكي، جاري الرد بشكل عادي...' })}\n\n`)
+  1229→                  );
+  1230→                  // Fall through to normal chat
+  1231→                }
+  1232→              } else {
+  1233→                // Send initial status with detected intent
+  1234→                const intentLabels: Record<string, string> = {
+  1235→                  'extract-topic': 'استخراج الموضوع',
+  1236→                  'summarize': 'تلخيص',
+  1237→                  'compile': 'تجميع',
+  1238→                  'outline': 'إنشاء فهرس',
+  1239→                  'compare': 'مقارنة',
+  1240→                  'flashcards': 'كروت مراجعة',
+  1241→                  'smart-doc': 'معالجة ذكية',
+  1242→                };
+  1243→                const intentLabel = intentLabels[docIntent!.type] || 'معالجة';
+  1244→                const topicSuffix = docIntent!.topic ? `: ${docIntent!.topic}` : '';
+  1245→                controller.enqueue(
+  1246→                  encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'started', message: `🚀 جاري ${intentLabel}${topicSuffix}...` })}\n\n`)
+  1247→                );
+  1248→
+  1249→                // Run the enhanced smart doc pipeline
+  1250→                const result = await processSmartDocV2({
+  1251→                  message,
+  1252→                  attachments: pipelineFiles,
+  1253→                  language: (language as 'ar' | 'en') || 'ar',
+  1254→                  channelName: 'بعقل هادي',
+  1255→                  userId: user?.id,
+  1256→                  intent: docIntent!,
+  1257→                }, (stage, progress, msg, detail) => {
+  1258→                  controller.enqueue(
+  1259→                    encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage, progress, message: msg, detail } })}\n\n`)
+  1260→                  );
+  1261→                });
+  1262→
+  1263→                if (result.success) {
+  1264→                  // Send completion event
+  1265→                  controller.enqueue(
+  1266→                    encoder.encode(`data: ${JSON.stringify({
+  1267→                      smartDocResult: {
+  1268→                        success: true,
+  1269→                        fileUrl: result.fileUrl,
+  1270→                        fileName: result.fileName,
+  1271→                        durationMs: result.durationMs,
+  1272→                        docType: result.docType || 'pdf',
+  1273→                      }
+  1274→                    })}\n\n`)
+  1275→                  );
+  1276→
+  1277→                  // Send text response
+  1278→                  const topicInfo = docIntent!.topic ? ` عن "${docIntent!.topic}"` : '';
+  1279→                  controller.enqueue(
+  1280→                    encoder.encode(`data: ${JSON.stringify({ content: `✅ تم ${intentLabel}${topicInfo} بنجاح!\n\n📄 **${result.fileName}**\n⏱️ الوقت: ${Math.round((result.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${result.fileUrl})\n\nتم تحليل الملفات ${pipelineFiles.length} وإنشاء المستند المطلوب 🎨` })}\n\n`)
+  1281→                  );
+  1282→
+  1283→                  // Save to DB
+  1284→                  if (user) {
+  1285→                    try {
+  1286→                      await db.generativeAsset.create({
+  1287→                        data: {
+  1288→                          userId: user.id,
+  1289→                          type: 'pdf',
+  1290→                          title: result.fileName || 'smart-doc-v2',
+  1291→                          prompt: message.slice(0, 200),
+  1292→                          filePath: '',
+  1293→                          fileSize: 0,
+  1294→                          metadata: JSON.stringify({
+  1295→                            fileUrl: result.fileUrl,
+  1296→                            mimeType: 'application/pdf',
+  1297→                            source: 'smart-doc-v2-pipeline',
+  1298→                            intentType: docIntent!.type,
+  1299→                            topic: docIntent!.topic || null,
+  1300→                          }),
+  1301→                          model: 'smart-doc-v2-pipeline',
+  1302→                        },
+  1303→                      });
+  1304→                    } catch (dbErr) {
+  1305→                      console.warn('[Chat] Smart Doc V2: Failed to save generative asset:', dbErr instanceof Error ? dbErr.message : String(dbErr));
+  1306→                    }
+  1307→                  }
+  1308→                } else {
+  1309→                  controller.enqueue(
+  1310→                    encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'failed', message: result.error || 'فشل في إنشاء المستند' })}\n\n`)
+  1311→                  );
+  1312→                  controller.enqueue(
+  1313→                    encoder.encode(`data: ${JSON.stringify({ content: `⚠️ لم أتمكن من إنشاء المستند: ${result.error || 'خطأ غير معروف'}\n\nلكنني أستطيع تحليل الملفات والإجابة على أسئلتك عنها. ماذا تريد أن تعرف؟` })}\n\n`)
+  1314→                  );
+  1315→                }
+  1316→
+  1317→                controller.close();
+  1318→                return;
+  1319→              }
+  1320→            } catch (smartDocErr) {
+  1321→              console.error('[Chat] Smart Doc V2 pipeline error:', smartDocErr);
+  1322→              controller.enqueue(
+  1323→                encoder.encode(`data: ${JSON.stringify({ smartDocStatus: 'error', message: 'حدث خطأ في معالجة المستند' })}\n\n`)
+  1324→              );
+  1325→              // Fall through to normal chat
+  1326→            }
+  1327→          }
+  1328→
+  1329→          // ── No progress events — removed for maximum speed ──
+  1330→          // Progress events add latency before the first token arrives.
+  1331→          // The user sees content as soon as streaming starts — no need for intermediate indicators.
+  1332→
+  1333→          // Send search results as a separate SSE event (only the data, no progress)
+  1334→          if (searchPerformed && searchResults.length > 0) {
+  1335→            controller.enqueue(
+  1336→              encoder.encode(`data: ${JSON.stringify({ searchResults })}\n\n`)
+  1337→            );
+  1338→          }
+  1339→
+  1340→          // ── Emit file generation status if intent detected ──
+  1341→          // When the user requests file generation, send a status event
+  1342→          // so the frontend can show a "generating PDF" indicator
+  1343→          // ── Open Mode and Normal Mode: Detect HTML output as file generation intent ──
+  1344→          // If the model outputs structured HTML (DOCTYPE, style blocks, divs with classes),
+  1345→          // treat it as a file generation intent regardless of whether the user used keywords.
+  1346→          // This catches cases where the model decides on its own to generate a document.
+  1347→          if (!fileGenIntentOpen && containsHtmlTags(accumulatedContent.slice(0, 500))) {
+  1348→            console.log('[Chat] Detected HTML output — enabling file generation pipeline');
+  1349→            fileGenIntentOpen = true;
+  1350→          }
+  1351→          if (fileGenIntent || fileGenIntentOpen) {
+  1352→            controller.enqueue(
+  1353→              encoder.encode(`data: ${JSON.stringify({ fileGenStatus: 'generating', message: 'جاري إنشاء ملف PDF...' })}\n\n`)
+  1354→            );
+  1355→          }
+  1356→
+  1357→          // ── Start parallel image generation if intent detected ──
+  1358→          let imageGenPromise: Promise<{ dataUrl: string; prompt: string } | null> | null = null;
+  1359→          if (shouldGenerateImage) {
+  1360→            // Emit a "generating image" status event so frontend can show loading state
+  1361→            controller.enqueue(
+  1362→              encoder.encode(`data: ${JSON.stringify({ imageGenStatus: 'generating', prompt: mediaGenIntent!.prompt })}\n\n`)
+  1363→            );
+  1364→            imageGenPromise = (async () => {
+  1365→              // Translate Arabic prompt to English for better image generation results
+  1366→              // Most image models work much better with English prompts
+  1367→              let imagePrompt = mediaGenIntent!.prompt;
+  1368→              const isArabicPrompt = /[\u0600-\u06FF]/.test(imagePrompt);
+  1369→              if (isArabicPrompt) {
+  1370→                try {
+  1371→                  const zai = await getZAIClient();
+  1372→                  const translateResult = await zai.chat.completions.create({
+  1373→                    model: 'glm-4-flash',
+  1374→                    messages: [
+  1375→                      { role: 'system', content: 'Translate the following text to English. Output ONLY the translation, nothing else. Be descriptive and add detail for image generation.' },
+  1376→                      { role: 'user', content: imagePrompt },
+  1377→                    ],
+  1378→                    max_tokens: 200,
+  1379→                  });
+  1380→                  const translated = translateResult.choices?.[0]?.message?.content?.trim();
+  1381→                  if (translated && translated.length > 2) {
+  1382→                    console.log(`[Chat] Image prompt translated: "${imagePrompt}" → "${translated}"`);
+  1383→                    imagePrompt = translated;
+  1384→                  }
+  1385→                } catch (translateErr) {
+  1386→                  console.warn('[Chat] Prompt translation failed, using original:', translateErr instanceof Error ? translateErr.message : String(translateErr));
+  1387→                }
+  1388→              }
+  1389→              try {
+  1390→                // ✅ استخدم Zhipu CogView-3-Flash مباشرة (مجاني 100%)
+  1391→                const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+  1392→                const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
+  1393→                const imgRes = await fetch(`${ZAI_BASE}/images/generations`, {
+  1394→                  method: 'POST',
+  1395→                  headers: {
+  1396→                    'Content-Type': 'application/json',
+  1397→                    'Authorization': `Bearer ${ZAI_API_KEY}`,
+  1398→                  },
+  1399→                  body: JSON.stringify({
+  1400→                    model: 'cogview-3-flash',  // ✅ مجاني
+  1401→                    prompt: imagePrompt,
+  1402→                    size: '1024x1024',
+  1403→                  }),
+  1404→                  signal: AbortSignal.timeout(60_000),
+  1405→                });
+  1406→                if (imgRes.ok) {
+  1407→                  const imgData = await imgRes.json();
+  1408→                  const imageUrl = imgData?.data?.[0]?.url || '';
+  1409→                  if (imageUrl) {
+  1410→                    // نحمل الصورة ونحوّلها base64
+  1411→                    const imgFetch = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+  1412→                    const buf = Buffer.from(await imgFetch.arrayBuffer());
+  1413→                    const mime = imgFetch.headers.get('content-type') || 'image/png';
+  1414→                    const base64 = `data:${mime};base64,${buf.toString('base64')}`;
+  1415→                    console.log('[Chat] ✅ CogView-3-Flash image generated — size:', buf.length);
+  1416→                    return { dataUrl: base64, prompt: mediaGenIntent!.prompt };
+  1417→                  }
+  1418→                } else {
+  1419→                  const err = await imgRes.text();
+  1420→                  console.warn('[Chat] CogView-3-Flash failed:', err.slice(0, 150));
+  1421→                }
+  1422→              } catch (zaiErr) {
+  1423→                console.warn('[Chat] CogView-3-Flash error, trying Pollinations:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
+  1424→              }
+  1425→              // Fallback: Pollinations FLUX (مجاني)
+  1426→              try {
+  1427→                const { generateImage } = await import('@/lib/pollinations');
+  1428→                const result = await generateImage({
+  1429→                  prompt: imagePrompt,
+  1430→                  model: 'flux',
+  1431→                  width: 1024,
+  1432→                  height: 1024,
+  1433→                  nologo: true,
+  1434→                });
+  1435→                if (result.base64) {
+  1436→                  console.log('[Chat] ✅ Pollinations FLUX image generated');
+  1437→                  return {
+  1438→                    dataUrl: `data:image/png;base64,${result.base64}`,
+  1439→                    prompt: mediaGenIntent!.prompt,
+  1440→                  };
+  1441→                }
+  1442→              } catch (pollErr) {
+  1443→                console.warn('[Chat] Pollinations FLUX failed:', pollErr instanceof Error ? pollErr.message : String(pollErr));
+  1444→              }
+  1445→              return null;
+  1446→            })();
+  1447→          }
+  1448→
+  1449→          // ── Start parallel video generation if intent detected ──
+  1450→          let videoGenPromise: Promise<{ videoUrl: string; prompt: string } | null> | null = null;
+  1451→
+  1452→          if (shouldGenerateVideo) {
+  1453→            // Emit a "generating video" status event so frontend can show loading state
+  1454→            controller.enqueue(
+  1455→              encoder.encode(`data: ${JSON.stringify({ videoGenStatus: 'generating', prompt: mediaGenIntent!.prompt })}\n\n`)
+  1456→            );
+  1457→
+  1458→            videoGenPromise = (async () => {
+  1459→              let videoPrompt = mediaGenIntent!.prompt;
+  1460→              // Translate Arabic prompt to English for better video generation
+  1461→              const isArabicPrompt = /[\u0600-\u06FF]/.test(videoPrompt);
+  1462→              if (isArabicPrompt) {
+  1463→                try {
+  1464→                  const zai = await getZAIClient();
+  1465→                  const translateResult = await zai.chat.completions.create({
+  1466→                    model: 'glm-4-flash',
+  1467→                    messages: [
+  1468→                      { role: 'system', content: 'Translate the following text to English. Output ONLY the translation, nothing else. Be descriptive for video generation.' },
+  1469→                      { role: 'user', content: videoPrompt },
+  1470→                    ],
+  1471→                    max_tokens: 200,
+  1472→                  });
+  1473→                  const translated = translateResult.choices?.[0]?.message?.content?.trim();
+  1474→                  if (translated && translated.length > 2) {
+  1475→                    console.log(`[Chat] Video prompt translated: "${videoPrompt}" → "${translated}"`);
+  1476→                    videoPrompt = translated;
+  1477→                  }
+  1478→                } catch (translateErr) {
+  1479→                  console.warn('[Chat] Video prompt translation failed:', translateErr instanceof Error ? translateErr.message : String(translateErr));
+  1480→                }
+  1481→              }
+  1482→
+  1483→              try {
+  1484→                const { generateVideoWithFallback } = await import('@/lib/hf-video.service');
+  1485→                const result = await generateVideoWithFallback(videoPrompt, ['cogvideox-2b', 'ltx-video-distilled'], { duration: 5 });
+  1486→                if (result.videoUrl) {
+  1487→                  return {
+  1488→                    videoUrl: result.videoUrl,
+  1489→                    prompt: mediaGenIntent!.prompt,
+  1490→                  };
+  1491→                }
+  1492→                return null;
+  1493→              } catch (videoErr) {
+  1494→                console.warn('[Chat] Inline video gen failed:', videoErr instanceof Error ? videoErr.message : String(videoErr));
+  1495→                return null;
+  1496→              }
+  1497→            })();
+  1498→          }
+  1499→
+  1500→          // ── Start parallel quiz generation if intent detected ──
+  1501→          let quizGenPromise: Promise<{
+  1502→            title: string;
+  1503→            questions: Array<{
+  1504→              id: string;
+  1505→              type: 'mcq' | 'true-false' | 'short-answer';
+  1506→              question: string;
+  1507→              options?: string[];
+  1508→              correctAnswer: string;
+  1509→              explanation?: string;
+  1510→              difficulty: 'easy' | 'medium' | 'hard';
+  1511→              points: number;
+  1512→            }>;
+  1513→          } | null> | null = null;
+  1514→
+  1515→          if (shouldGenerateQuiz) {
+  1516→            // Emit a "generating quiz" status event
+  1517→            controller.enqueue(
+  1518→              encoder.encode(`data: ${JSON.stringify({ quizGenStatus: 'generating' })}\n\n`)
+  1519→            );
+  1520→
+  1521→            quizGenPromise = (async () => {
+  1522→              try {
+  1523→                // Extract text content from PDF and text attachments
+  1524→                const contentParts: string[] = [];
+  1525→                for (const att of parsed.attachments) {
+  1526→                  if (att.type === 'text' && att.textContent) {
+  1527→                    contentParts.push(`--- ملف: ${att.name} ---\n${att.textContent}\n--- نهاية الملف ---`);
+  1528→                  } else if (att.type === 'pdf' && att.content) {
+  1529→                    const extractedText = await extractPdfWithVlmAndText(att.content, att.name);
+  1530→                    if (extractedText && !extractedText.startsWith('[')) {
+  1531→                      contentParts.push(`--- ملف: ${att.name} ---\n${extractedText}\n--- نهاية الملف ---`);
+  1532→                    }
+  1533→                  }
+  1534→                }
+  1535→                const fileContent = contentParts.join('\n\n').trim() || undefined;
+  1536→
+  1537→                // Extract topic from user message using improved extraction
+  1538→                const topic = extractTopicFromMessage(parsed.cleanedMessage || message);
+  1539→
+  1540→                // Build conversation context for context-aware quiz generation
+  1541→                const convContext = conversationMessages.length > 0
+  1542→                  ? buildConversationContext(conversationMessages, 10)
+  1543→                  : undefined;
+  1544→
+  1545→                // Use shared quiz generation service
+  1546→                const result = await generateQuiz({
+  1547→                  topic,
+  1548→                  content: fileContent,
+  1549→                  conversationContext: convContext,
+  1550→                  questionCount: 10,
+  1551→                  difficulty: 'medium',
+  1552→                  types: ['mcq', 'true-false'],
+  1553→                });
+  1554→
+  1555→                if (!result) return null;
+  1556→
+  1557→                console.log(`[Chat] Quiz gen: Generated ${result.questions.length} questions successfully (topic: "${topic}")`);
+  1558→                return result;
+  1559→              } catch (quizErr) {
+  1560→                console.error('[Chat] Quiz gen failed:', quizErr instanceof Error ? quizErr.message : String(quizErr));
+  1561→                return null;
+  1562→              }
+  1563→            })();
+  1564→          }
+  1565→
+  1566→          // ── Helper: enqueue content and cancel initial timeout on first token ──
+  1567→          // Once the model starts streaming, the 60s initial timeout is cancelled.
+  1568→          // After that, the 20-minute inactivity watchdog takes over — resets on every token.
+  1569→          // Also performs REAL-TIME HTML stripping for non-file-gen responses.
+  1570→          function enqueueContent(content: string) {
+  1571→            if (streamClosed) {
+  1572→              console.warn('[Chat] enqueueContent skipped — stream already closed');
+  1573→              return;
+  1574→            }
+  1575→            if (!streamGotContent) {
+  1576→              streamGotContent = true;
+  1577→              clearTimeout(timeoutId!); // Cancel initial timeout — model is responding!
+  1578→              console.log('[Chat] First content received — initial timeout cancelled');
+  1579→              startInactivityWatchdog(); // Start the inactivity watchdog instead
+  1580→            }
+  1581→            lastContentTime = Date.now(); // Reset inactivity timer on every token
+  1582→            // PERF: Push to array instead of string concatenation
+  1583→            contentChunks.push(content);
+  1584→            accumulatedContent += content;
+  1585→
+  1586→            // ── Pollinations ad detection (streaming-safe) ──
+  1587→            // The free Pollinations API appends an ad at the end of responses.
+  1588→            // Once we detect the ad boundary, we suppress all content beyond it.
+  1589→            if (adBoundaryIndex === -1) {
+  1590→              const boundary = findAdBoundary(accumulatedContent);
+  1591→              if (boundary !== -1) {
+  1592→                adBoundaryIndex = boundary;
+  1593→                console.log(`[Chat] Pollinations ad detected at char ${boundary} — suppressing promotional content`);
+  1594→              }
+  1595→            }
+  1596→
+  1597→            // Compute the clean (ad-free) accumulated content
+  1598→            const cleanAccumulated =
+  1599→              adBoundaryIndex !== -1
+  1600→                ? accumulatedContent.slice(0, adBoundaryIndex)
+  1601→                : accumulatedContent;
+  1602→
+  1603→            // If the ad boundary is mid-chunk, we may need to suppress this chunk entirely
+  1604→            if (adBoundaryIndex !== -1 && displayedCleanLength >= cleanAccumulated.length) {
+  1605→              // Everything clean has already been sent — this chunk is pure ad, skip it
+  1606→              return;
+  1607→            }
+  1608→
+  1609→            // The new clean content to display for this chunk = cleanAccumulated minus what we already sent
+  1610→            const newClean = cleanAccumulated.slice(displayedCleanLength);
+  1611→            displayedCleanLength = cleanAccumulated.length;
+  1612→
+  1613→            // ── Real-time HTML detection for auto file generation ──
+  1614→            // If the model outputs structured HTML (DOCTYPE, style blocks, divs with classes),
+  1615→            // and we haven't already detected file generation intent, set fileGenIntentOpen = true.
+  1616→            // This ensures the HTML is preserved for PDF generation instead of being stripped.
+  1617→            if (!fileGenIntentOpen && accumulatedContent.length > 50 && containsHtmlTags(accumulatedContent.slice(0, 500))) {
+  1618→              fileGenIntentOpen = true;
+  1619→              console.log('[Chat] Real-time: Detected HTML output — enabling file generation pipeline');
+  1620→              // Send fileGenStatus event so the frontend shows "generating PDF" indicator
+  1621→              controller.enqueue(
+  1622→                encoder.encode(`data: ${JSON.stringify({ fileGenStatus: 'generating', message: 'جاري إنشاء ملف PDF...' })}\n\n`)
+  1623→              );
+  1624→            }
+  1625→
+  1626→            // ── Real-time HTML stripping for non-file-gen responses ──
+  1627→            // Instead of waiting until the end, strip HTML tags from each chunk
+  1628→            // so the user never sees raw HTML in the chat
+  1629→            let displayContent = newClean;
+  1630→            if (!isOpenMode && !fileGenIntent && !fileGenIntentOpen && !cachedContentStrategyNeeded) {
+  1631→              // Quick check: if this chunk contains any HTML tags, strip them
+  1632→              if (/<style|<div|<span|class=["']|<\/div>|<\/span>|<\/p>|<p[^>]*>|<br\s*\/?>|<!DOCTYPE|<html|<body|<head|<table|<tr|<td|<th|<ul|<ol|<li[^>]*>|<\/li>|<strong|<em\b|<h[1-6]|<section|<article|<nav|<footer|<header|<main|<form|<input|<button|<script|<meta|<link\b/i.test(displayContent)) {
+  1633→                displayContent = stripHtmlChunk(displayContent);
+  1634→              }
+  1635→            }
+  1636→
+  1637→            if (displayContent.length > 0) {
+  1638→              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: displayContent })}\n\n`));
+  1639→            }
+  1640→          }
+  1641→
+  1642→          // Timeout guard — 60 seconds INITIAL timeout, but cancelled once streaming starts.
+  1643→          // Once streaming starts, a 20-minute INACTIVITY watchdog takes over.
+  1644→          // This prevents the stream from hanging forever if the model stops producing tokens
+  1645→          // (e.g., network drop, provider timeout, etc.) without killing active streams.
+  1646→          // Any activity (token received) resets the inactivity timer automatically.
+  1647→          let streamGotContent = false;
+  1648→          let lastContentTime = Date.now();
+  1649→          let inactivityWatchdogId: ReturnType<typeof setTimeout> | null = null;
+  1650→
+  1651→          // ── SSE Heartbeat: Send keepalive ping every 15 seconds ──────────
+  1652→          // Prevents proxies/load balancers from closing idle connections
+  1653→          // and keeps the frontend stream watchdog from triggering prematurely
+  1654→          const heartbeatInterval = setInterval(() => {
+  1655→            if (streamClosed) {
+  1656→              clearInterval(heartbeatInterval);
+  1657→              return;
+  1658→            }
+  1659→            try {
+  1660→              controller.enqueue(encoder.encode(': heartbeat\n\n'));
+  1661→            } catch {
+  1662→              clearInterval(heartbeatInterval);
+  1663→            }
+  1664→          }, 15_000);
+  1665→
+  1666→          // إلغاء الـ timeout نهائياً — البث مفيش مهلة، يفضل فاتح لحد ما الموديل يخلص
+  1667→          // (عبس طلب إلغاء الموقت عشان الاتصال ما يتقطعش)
+  1668→          const timeoutId: ReturnType<typeof setTimeout> | null = null;
+  1669→
+  1670→          // Inactivity watchdog كمان ملغي — البث يفضل فاتح
+  1671→          function startInactivityWatchdog() {
+  1672→            // no-op — تم إلغاء الـ inactivity timeout
+  1673→          }
+  1674→
+  1675→          try {
+  1676→            // ── Determine provider based on modelConfig.provider ──
+  1677→            // Route to the PRIMARY provider as defined in models.ts
+  1678→            // Each model has a designated primary provider for optimal performance
+  1679→            const hasImageAttachments = parsed.attachments.some((a) => a.type === 'image');
+  1680→            const primaryProvider = modelConfig.provider;
+  1681→            const pollinationsEntry = CHAT_MODEL_MAP[model];
+  1682→
+  1683→            // Vision models with image attachments must use ZhipuAI (GLM-4V supports vision)
+  1684→            // CRITICAL FIX: When ANY image is attached, auto-route to ZhipuAI vision
+  1685→            // regardless of the active model. This prevents "all providers failed" errors
+  1686→            // when non-vision models receive images.
+  1687→            // Also route to ZhipuAI if the model supports vision AND is a ZhipuAI model
+  1688→            // (GLM-4-Flash, GLM-4V, etc.) so images go through ZAI's vision API.
+  1689→            const useZhipuAIForVision = hasImageAttachments && (
+  1690→              modelConfig.glmModel === 'glm-4v-flash' || glmModel === 'glm-4v' ||
+  1691→              modelConfig.capabilities.vision === false ||
+  1692→              (modelConfig.capabilities.vision === true && modelConfig.provider === 'zhipuai')
+  1693→            );
+  1694→
+  1695→            console.log(`[Chat] Routing model=${model}, provider=${primaryProvider}, hasImages=${hasImageAttachments}, visionOverride=${useZhipuAIForVision}`);
+  1696→
+  1697→            // ── PRIORITY: Try Cerebras first for ALL text-only models (FREE, ultra-fast) ──
+  1698→            // Cerebras provides ~500-2000 T/s which is 5-20x faster than OpenRouter
+  1699→            // Skip for vision models with actual image attachments (Cerebras doesn't support vision)
+  1700→            //
+  1701→            // CRITICAL FIX: Use a LOCAL variable instead of globalThis to prevent race conditions
+  1702→            // between concurrent requests. The old globalThis.__cerebrasSucceeded caused chat
+  1703→            // to stop after 2-3 messages because Request B could read Request A's flag.
+  1704→            let cerebrasAlreadyHandled = false;
+  1705→            // ── تخطّي Cerebras لو الموديل zhipuai (عبس) — استخدم ZAI مباشرة ──
+  1706→            const cerebrasMapping = (primaryProvider !== 'zhipuai' && primaryProvider !== 'github' && primaryProvider !== 'gemini' && primaryProvider !== 'groq' && primaryProvider !== 'openai' && primaryProvider !== 'anthropic' && (!hasImageAttachments || !useZhipuAIForVision)) ? getCerebrasChatModelMapping(model) : null;
+  1707→            if (primaryProvider === 'zhipuai') {
+  1708→              console.log('[Chat] Skipping Cerebras — using ZAI directly for zhipuai model');
+  1709→            } else if (primaryProvider === 'github' || primaryProvider === 'gemini' || primaryProvider === 'groq' || primaryProvider === 'openai' || primaryProvider === 'anthropic') {
+  1710→              console.log(`[Chat] Skipping Cerebras — using ${primaryProvider} directly`);
+  1711→            } else if (!isProviderHealthy('cerebras')) {
+  1712→              console.log('[Chat] Skipping Cerebras (recently failed)');
+  1713→            }
+  1714→            if (cerebrasMapping && primaryProvider !== 'zhipuai' && primaryProvider !== 'github' && primaryProvider !== 'gemini' && primaryProvider !== 'groq' && primaryProvider !== 'openai' && primaryProvider !== 'anthropic' && !useZhipuAIForVision && isProviderHealthy('cerebras') && CEREBRAS_API_KEY) {
+  1715→              try {
+  1716→                console.log(`[Chat] Trying Cerebras first: ${cerebrasMapping.cerebrasModel} (${cerebrasMapping.label}) — FREE, ultra-fast`);
+  1717→
+  1718→                const cerebrasMessages = messages.map((m: any) => ({
+  1719→                  role: m.role as 'system' | 'user' | 'assistant',
+  1720→                  content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+  1721→                }));
+  1722→
+  1723→                // Use AbortController to cancel the Cerebras stream if it times out
+  1724→                const cerebrasAbortController = new AbortController();
+  1725→                let cerebrasGotContent = false;
+  1726→                let cerebrasStreamDone = false;
+  1727→                let cerebrasResolve!: (value: 'done' | 'timeout') => void;
+  1728→                const cerebrasFirstToken = new Promise<'done' | 'timeout'>((resolve) => {
+  1729→                  cerebrasResolve = resolve;
+  1730→                });
+  1731→
+  1732→                // Start Cerebras streaming in background
+  1733→                // FIX #5: Pass AbortController signal to properly terminate the stream on timeout
+  1734→                // Without this, the for-await loop continues consuming even after abort,
+  1735→                // causing a stream leak that keeps the connection open unnecessarily.
+  1736→                (async () => {
+  1737→                  try {
+  1738→                    const cerebrasChunkStream = streamCerebrasChat({
+  1739→                      messages: cerebrasMessages,
+  1740→                      model: cerebrasMapping.cerebrasModel as any,
+  1741→                      temperature: 0.7,
+  1742→                      signal: cerebrasAbortController.signal,
+  1743→                    });
+  1744→                    for await (const chunk of cerebrasChunkStream) {
+  1745→                      if (streamClosed || cerebrasAbortController.signal.aborted) {
+  1746→                        cerebrasStreamDone = true;
+  1747→                        cerebrasResolve('done');
+  1748→                        return;
+  1749→                      }
+  1750→                      const content = chunk.choices?.[0]?.delta?.content || '';
+  1751→                      if (content) {
+  1752→                        if (!cerebrasGotContent) {
+  1753→                          cerebrasGotContent = true;
+  1754→                          // First content received — resolve the race
+  1755→                          cerebrasResolve('done');
+  1756→                        }
+  1757→                        enqueueContent(content);
+  1758→                      }
+  1759→                    }
+  1760→                    cerebrasStreamDone = true;
+  1761→                    cerebrasResolve('done');
+  1762→                  } catch {
+  1763→                    // Stream was aborted or errored — mark as done to unblock waiters
+  1764→                    cerebrasStreamDone = true;
+  1765→                    cerebrasResolve('done');
+  1766→                  }
+  1767→                })();
+  1768→
+  1769→                // Race: if no content within 3s, abort Cerebras and fall back
+  1770→                const cerebrasTimeout = setTimeout(() => {
+  1771→                  if (!cerebrasGotContent && !cerebrasStreamDone) {
+  1772→                    cerebrasAbortController.abort();
+  1773→                    cerebrasResolve('timeout');
+  1774→                  }
+  1775→                }, 3_000);
+  1776→
+  1777→                const raceResult = await cerebrasFirstToken;
+  1778→                clearTimeout(cerebrasTimeout);
+  1779→
+  1780→                if (raceResult === 'timeout' && !cerebrasGotContent) {
+  1781→                  console.warn('[Chat] Cerebras first-token timeout (3s) — falling back to configured provider');
+  1782→                  // Wait a brief moment for the abort to propagate, then continue
+  1783→                  await new Promise((r) => setTimeout(r, 100));
+  1784→                } else if (cerebrasGotContent) {
+  1785→                  // Cerebras actually produced content — wait for the full stream to complete
+  1786→                  console.log(`[Chat] Cerebras succeeded (${accumulatedContent.length} chars), waiting for full stream...`);
+  1787→                  // The stream is still running in the background — wait for it to finish
+  1788→                  // by continuing to read until cerebrasStreamDone is true
+  1789→                  while (!cerebrasStreamDone && !streamClosed) {
+  1790→                    await new Promise((r) => setTimeout(r, 50));
+  1791→                  }
+  1792→                  cerebrasAlreadyHandled = true;
+  1793→                  reportAggregatorSuccess('cerebras', 'chat', Date.now() - streamStartTime);
+  1794→                } else {
+  1795→                  // Cerebras stream completed WITHOUT producing any content (e.g., Cloudflare block)
+  1796→                  // This means Cerebras is not working — fall back to the configured provider
+  1797→                  console.warn(`[Chat] Cerebras completed with 0 chars (likely blocked) — falling back to configured provider`);
+  1798→                  markProviderFailed('cerebras');
+  1799→                  reportAggregatorFailure('cerebras', 'chat', 'Completed with 0 chars (likely blocked)');
+  1800→                  // Continue to the normal provider routing below
+  1801→                }
+  1802→              } catch (cerebrasError) {
+  1803→                console.warn('[Chat] Cerebras failed, falling back to configured provider:', cerebrasError instanceof Error ? cerebrasError.message : String(cerebrasError));
+  1804→                markProviderFailed('cerebras');
+  1805→                reportAggregatorFailure('cerebras', 'chat', cerebrasError instanceof Error ? cerebrasError.message : String(cerebrasError));
+  1806→                // Fall through to the normal provider routing below
+  1807→              }
+  1808→            }
+  1809→
+  1810→            // ── Helper: stream from ZhipuAI (used as ultimate fallback) ──
+  1811→            async function streamFromZhipuAI() {
+  1812→              const zai = await getZAIClient();
+  1813→              
+  1814→              // ── CRITICAL: When images are present, use GLM-4V (vision model) ──
+  1815→              // GLM-4-Flash and GLM-5.2 do NOT support vision.
+  1816→              // Only GLM-4V supports image input via the ZAI SDK.
+  1817→              // When images are attached, override the model to glm-4v
+  1818→              // and use the vision API endpoint.
+  1819→              const hasImagesInMessages = messages.some(
+  1820→                (m: any) => Array.isArray(m.content) && m.content.some((c: any) => c.type === 'image_url')
+  1821→              );
+  1822→              
+  1823→              if (hasImagesInMessages) {
+  1824→                // Use glm-4v-flash (FREE vision model on BigModel) for image analysis
+  1825→                // Supports up to 10 images per request. max_tokens=1024 per image.
+  1826→                // Fallback: HuggingFace LLaVA + Pollinations (both free)
+  1827→                
+  1828→                try {
+  1829→                  // Extract image URLs and text from messages
+  1830→                  const imageUrls: string[] = [];
+  1831→                  let textContent = 'حلل هذه الصورة';
+  1832→                  for (const msg of messages) {
+  1833→                    if (Array.isArray(msg.content)) {
+  1834→                      for (const part of msg.content) {
+  1835→                        if (part.type === 'image_url' && part.image_url?.url) {
+  1836→                          imageUrls.push(part.image_url.url);
+  1837→                        }
+  1838→                        if (part.type === 'text' && part.text) {
+  1839→                          textContent = part.text;
+  1840→                        }
+  1841→                      }
+  1842→                    } else if (typeof msg.content === 'string' && msg.role === 'user') {
+  1843→                      textContent = msg.content;
+  1844→                    }
+  1845→                  }
+  1846→                  
+  1847→                  console.log(`[Chat] Vision request: using glm-4v-flash (FREE on BigModel) for ${imageUrls.length} image(s)`);
+  1848→                  
+  1849→                  // ── TIER 1: Try glm-4v-flash (FREE on BigModel via ZAI SDK) ──
+  1850→                  // GLM-4V-Flash supports multiple images in a single request.
+  1851→                  // Build content array with text + all images.
+  1852→                  try {
+  1853→                    const contentParts: any[] = [
+  1854→                      { type: 'text', text: textContent },
+  1855→                    ];
+  1856→                    // Add up to 10 images (BigModel limit)
+  1857→                    for (let i = 0; i < Math.min(imageUrls.length, 10); i++) {
+  1858→                      contentParts.push({
+  1859→                        type: 'image_url',
+  1860→                        image_url: { url: imageUrls[i] },
+  1861→                      });
+  1862→                    }
+  1863→                    
+  1864→                    const visionRequest: any = {
+  1865→                      model: 'glm-4v-flash',
+  1866→                      messages: [{
+  1867→                        role: 'user',
+  1868→                        content: contentParts,
+  1869→                      }],
+  1870→                      stream: false,
+  1871→                      thinking: { type: 'disabled' },
+  1872→                      max_tokens: 1024,
+  1873→                      temperature: 0.7,
+  1874→                    };
+  1875→                    
+  1876→                    const visionCompletion = await zai.chat.completions.create(visionRequest);
+  1877→                    const visionText = visionCompletion.choices?.[0]?.message?.content || '';
+  1878→                    
+  1879→                    if (visionText) {
+  1880→                      console.log(`[Chat] glm-4v-flash vision SUCCESS (${imageUrls.length} images)`);
+  1881→                      if (!streamClosed) {
+  1882→                        enqueueContent(visionText);
+  1883→                      }
+  1884→                      streamClosed = true;
+  1885→                      try {
+  1886→                        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+  1887→                        controller.close();
+  1888→                      } catch {}
+  1889→                      return;
+  1890→                    }
+  1891→                  } catch (glmFlashErr) {
+  1892→                    console.warn('[Chat] glm-4v-flash failed:', glmFlashErr instanceof Error ? glmFlashErr.message : String(glmFlashErr));
+  1893→                  }
+  1894→                  
+  1895→                  // ── TIER 2: HuggingFace LLaVA (FREE) ──
+  1896→                  console.log('[Chat] Falling back to HuggingFace LLaVA');
+  1897→                  const hfToken = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
+  1898→                  const visionResponse = await fetch('https://router.huggingface.co/hf-inference/models/llava-hf/llava-1.5-7b-hf', {
+  1899→                    method: 'POST',
+  1900→                    headers: {
+  1901→                      'Content-Type': 'application/json',
+  1902→                      ...(hfToken ? { Authorization: `Bearer ${hfToken}` } : {}),
+  1903→                    },
+  1904→                    body: JSON.stringify({
+  1905→                      inputs: {
+  1906→                        image: imageUrls[0]?.split(',')[1] || imageUrls[0],
+  1907→                        prompt: textContent,
+  1908→                      },
+  1909→                    }),
+  1910→                    signal: AbortSignal.timeout(30_000),
+  1911→                  });
+  1912→                  
+  1913→                  if (visionResponse.ok) {
+  1914→                    const visionData = await visionResponse.json();
+  1915→                    const visionText = visionData[0]?.generated_text || visionData.generated_text || '';
+  1916→                    if (visionText) {
+  1917→                      enqueueContent(`📊 تحليل الصورة: ${visionText}`);
+  1918→                      return;
+  1919→                    }
+  1920→                  }
+  1921→                  
+  1922→                  // ── TIER 3: Pollinations Vision (FREE) ──
+  1923→                  console.log('[Chat] Falling back to Pollinations vision');
+  1924→                  const pollResponse = await fetch('https://text.pollinations.ai/openai', {
+  1925→                    method: 'POST',
+  1926→                    headers: { 'Content-Type': 'application/json' },
+  1927→                    body: JSON.stringify({
+  1928→                      model: 'openai',
+  1929→                      messages: [
+  1930→                        { role: 'system', content: 'أنت مساعد يحلل الصور بالعربية.' },
+  1931→                        { role: 'user', content: [
+  1932→                          { type: 'text', text: textContent },
+  1933→                          { type: 'image_url', image_url: { url: imageUrls[0] } },
+  1934→                        ]},
+  1935→                      ],
+  1936→                    }),
+  1937→                    signal: AbortSignal.timeout(30_000),
+  1938→                  });
+  1939→                  
+  1940→                  if (pollResponse.ok) {
+  1941→                    const pollData = await pollResponse.json();
+  1942→                    const pollText = pollData.choices?.[0]?.message?.content || '';
+  1943→                    if (pollText) {
+  1944→                      enqueueContent(`📊 تحليل الصورة: ${pollText}`);
+  1945→                      return;
+  1946→                    }
+  1947→                  }
+  1948→                  
+  1949→                  // All tiers failed
+  1950→                  enqueueContent('⚠️ تعذر تحليل الصورة. حاول مرة أخرى.');
+  1951→                } catch (visionErr) {
+  1952→                  console.warn('[Chat] All vision methods failed:', visionErr);
+  1953→                  enqueueContent('⚠️ تعذر تحليل الصورة. حاول مرة أخرى.');
+  1954→                }
+  1955→                return;
+  1956→              }
+  1957→              
+  1958→              // ── Normal text streaming (no images) ──
+  1959→
+  1960→              // ── PRE-SCAN LAYER: execute action tools BEFORE the LLM can refuse ──
+  1961→              // الـ LLM (GLM-4-Flash) عنيد مع privacy — بيرفض يقرا جهات اتصال.
+  1962→              // الحل: نـ scan رسالة المستخدم الأول. لو لقينا طلب واضح (رقم/تذكير/مهمة/ملف)
+  1963→              // → ننفّذ الأداة مباشرة → نبعت النتيجة للـ LLM عشان يـ formatها بس.
+  1964→              // كده الـ LLM مش هيقدر يرفض لأن الأداة اتنفذت بالفعل.
+  1965→              try {
+  1966→                const { executeTool } = await import('@/lib/mcp/registry');
+  1967→                const { runWithContext } = await import('@/lib/request-context');
+  1968→                const lastUserMsg = messages.filter((m: any) => m.role === 'user').slice(-1)[0];
+  1969→                const userText = typeof lastUserMsg?.content === 'string'
+  1970→                  ? lastUserMsg.content
+  1971→                  : JSON.stringify(lastUserMsg?.content ?? '');
+  1972→                const lowerText = userText.toLowerCase();
+  1973→
+  1974→                // status helper
+  1975→                const sendPreStatus = (status: string, phase?: string) => {
+  1976→                  if (streamClosed) return;
+  1977→                  const encoder = new TextEncoder();
+  1978→                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ backendStatus: status, phase })}\n\n`));
+  1979→                };
+  1980→
+  1981→                // Detect action intent + execute tool directly
+  1982→                let preToolResult: { toolName: string; result: any } | null = null;
+  1983→
+  1984→                // ── كاشف الأسئلة — لو المستخدم بيسأل (مش بيأمر) → ما تـ triggerش أدوات ──
+  1985→                const isQuestion = /^(ايه|إيه|شنو|كام|ليه|ازاي|إزاي|امتى|إمتى|فين|مين|هل|ممكن|تقدر|تعرف|تقول|بتاعتك|بتاعك|الخاص|بتاع|عرفني|اشرحلي|فهمني|كيف|متى|أين|من|ما هو|ما هي|ايه هو|إيه هو|ايه رايك|إيه رأيك)/i.test(userText.trim())
+  1986→                  || /كام|كم/i.test(userText) && /ذاكر|memory|context|كونتكست/i.test(userText)
+  1987→                  // أي جملة مش فيها فعل أمر صريح = سؤال
+  1988→                  || !/(?:اعمل|أنشئ|انشئ|حط|ضيف|هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دورلي|دور\s*لي|ابحث|امسح|احذف|شيل|ارفع|احفظ|اكتب|لخص|حلل|اقرا|افتكر|ذكرني|فكرني|نبهني|سجل|ابعت|ارسل|نبه|خزن)/i.test(userText);
+  1989→
+  1990→                await runWithContext(request, async () => {
+  1991→                  // ── لو سؤال عام أو مفيش فعل أمر → ما تـ triggerش أدوات خالص ──
+  1992→                  if (isQuestion) {
+  1993→                    console.log("[Pre-scan] no action verb — skipping tool execution");
+  1994→                    return;
+  1995→                  }
+  1996→
+  1997→                  // ── فحص صريح للأفعال — لازم فيه فعل أمر واضح ──
+  1998→                  const hasActionVerb = true; // لو وصل هنا معناه إن فيه فعل أمر (تم فحصه فوق)
+  1999→
+  2000→                  if (hasActionVerb && (lowerText.includes("رقم") || lowerText.includes("هاتف") || lowerText.includes("اتصال") || lowerText.includes("contact"))) {
+
+[showing lines 1-2000 of 3867; use offset=2001 with limit to continue reading]
