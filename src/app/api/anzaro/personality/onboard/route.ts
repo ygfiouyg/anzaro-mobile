@@ -3,8 +3,24 @@ import { ONBOARDING_QUESTIONS } from '@/lib/anzaro-onboarding'
 import { requireAnzaroUser } from '@/lib/anzaro-auth-helper'
 import { db } from '@/lib/db'
 
+/** Fisher-Yates shuffle — returns a new shuffled array (non-mutating). */
+function shuffleArray<T>(arr: T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
 export async function GET() {
-  return NextResponse.json({ questions: ONBOARDING_QUESTIONS, total: ONBOARDING_QUESTIONS.length })
+  // V.16: Shuffle questions per session so users don't see the same order every time.
+  // Demographic questions (name, age, occupation, dialect) stay first — they're prerequisites.
+  // The rest (psychological, driver, preference) are shuffled for variety.
+  const demographic = ONBOARDING_QUESTIONS.filter((q) => q.category === 'demographic')
+  const rest = ONBOARDING_QUESTIONS.filter((q) => q.category !== 'demographic')
+  const questions = [...demographic, ...shuffleArray(rest)]
+  return NextResponse.json({ questions, total: questions.length })
 }
 
 // Phase 3.2: compile the answers into a user_personality.md profile

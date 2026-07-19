@@ -3,15 +3,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Tailwind v4 content-scanning exclusions — prevents skills/ and logs from
-   breaking CSS compilation (they contain class-name text as documentation). */
-@source not "../../skills";
-@source not "../../upload";
-@source not "../../download";
-@source not "../../examples";
-@source not "../../mini-services";
-@source not "../../.zscripts";
-@source not "../../tools";
+/* Tailwind v4 content-scanning — only scan src/ and components.
+   Note: @source not is not supported by Turbopack in Next.js 16.1.3,
+   so we use explicit @source inclusion instead. */
+@source "../**/*.{ts,tsx,js,jsx}";
 
 /* ═══════════════════════════════════════════════════════════════
    @theme inline — Tailwind v4 token mapping

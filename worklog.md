@@ -1284,3 +1284,326 @@ Stage Summary:
 - **6 ملفات أنشأت/عدّلت** للـ routes + 4 ملفات components اتصلحت
 
 *Last updated: 2025-01-30 (Round 23) · QA Audit: 10 critical bugs fixed, media player E2E verified*
+
+---
+Task ID: personality-integration-audit
+Agent: Personality Integration Auditor
+Task: Audit how the onboarding quiz results are used by the AI
+
+Work Log:
+- Read /home/z/my-project/worklog.md to understand project context (Anzaro AI Smart Ball, Next.js 16, all 8 phases done)
+- Inspected src/lib/anzaro-onboarding.ts → 18 fixed-order questions (4 demographic + 7 psychological + 4 driver + 3 preference)
+- Inspected src/app/api/anzaro/personality/onboard/route.ts → GET endpoint returns questions verbatim (NO shuffle)
+- Inspected src/components/anzaro/OnboardingFlow.tsx → client renders questions in the order returned by API (NO client-side shuffle)
+- Inspected src/lib/anzaro-llm.ts → found buildPersonalitySystemPrompt() (rich, dialect-aware, trait-directive-aware) and chatWithPersonality()
+- Inspected src/lib/chat/system-prompt-builder.ts → main system prompt builder, does NOT know about PersonalityProfile
+- Inspected src/app/api/chat/stream/route.ts (lines 629-648) → found personality injection IS present, but uses inline markdown block (subset of fields)
+- Inspected src/lib/anzaro-control-engine.ts → NO personality usage for device/scene decisions (could be enhanced in Phase 7.x)
+- Inspected src/app/page.tsx (lines 54-79) → onboarding trigger check works correctly via /api/anzaro/personality/profile
+- Inspected src/app/api/anzaro/personality/profile/route.ts → uses `req: NextRequest` parameter correctly (the old "req is not defined" bug is FIXED)
+- Verified buildPersonalitySystemPrompt is imported in src/lib/anzaro-smart-ball-detector.ts but NEVER actually called (dead import)
+
+Stage Summary:
+
+═══════════════════════════════════════════════════════════════════
+ AUDIT REPORT — Personality Integration (3 Areas)
+═══════════════════════════════════════════════════════════════════
+
+╔──────────────────────────────────────────────────────────────────╗
+║ AREA 1 — Question Randomization in Onboarding                   ║
+╚──────────────────────────────────────────────────────────────────╝
+
+CURRENT STATE: ❌ NOT RANDOMIZED
+
+- The 18 questions live in `src/lib/anzaro-onboarding.ts` (lines 5-151) in a hardcoded order:
+  [name, age, occupation, dialect, leadership, stubbornness, analytical, emotional,
+   discipline, sociability, humor, driver_success, driver_fear, preference_communication,
+   preference_morning, trigger_stress, goal_3months, anything_else]
+
+- The GET endpoint at `src/app/api/anzaro/personality/onboard/route.ts` lines 6-8:
+    export async function GET() {
+      return NextResponse.json({ questions: ONBOARDING_QUESTIONS, total: ONBOARDING_QUESTIONS.length })
+    }
+  Returns them in the same order — every user sees the same sequence.
+
+- The OnboardingFlow component at `src/components/anzaro/OnboardingFlow.tsx` lines 61-76 fetches
+  and renders them in order — no client-side shuffle.
+
+- The POST endpoint at lines 11-100 accepts `answers: Record<string, string>` keyed by question
+  id, so question order is irrelevant to the compiler (it iterates `Object.entries`). Shuffling
+  is therefore safe — it will not break personality compilation.
+
+FIX — Fisher-Yates shuffle in the GET endpoint, keeping demographic questions first:
+
+File: /home/z/my-project/src/app/api/anzaro/personality/onboard/route.ts
+Replace the GET function (lines 6-8) with:
+
+```ts
+// Phase 3.1 (audit fix): shuffle questions per-user so the onboarding
+// feels less rote on repeat sessions. The 4 demographic questions
+// (name/age/occupation/dialect) stay pinned at the top in fixed order
+// because they are not psychological — they're identity setup.
+// The remaining psychological/preference/driver questions are shuffled
+// with Fisher-Yates on every fetch.
+function shuffleArray<T>(arr: T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
+export async function GET() {
+  const demographic = ONBOARDING_QUESTIONS.filter((q) => q.category === 'demographic')
+  const rest = ONBOARDING_QUESTIONS.filter((q) => q.category !== 'demographic')
+  const questions = [...demographic, ...shuffleArray(rest)]
+  return NextResponse.json({ questions, total: questions.length })
+}
+```
+
+No changes needed in OnboardingFlow.tsx — it already iterates `questions[current]`
+and submits by `id`, so shuffling on the server is transparent to the client.
+
+╔──────────────────────────────────────────────────────────────────╗
+║ AREA 2 — Personality Profile Usage in AI Responses              ║
+╚──────────────────────────────────────────────────────────────────╝
+
+CURRENT STATE: ⚠️ PARTIALLY INJECTED (works, but suboptimal)
+
+✅ The main chat stream route DOES inject the personality profile.
+   Location: src/app/api/chat/stream/route.ts, lines 629-648.
+
+   Current injection code:
+   ```ts
+   if (user?.id) {
+     try {
+       const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } });
+       if (profile) {
+         const personalityAddon = `\n\n═══ ملف شخصية المستخدم (user_personality.md) ═══\n${profile.markdown}\n\n═══ توجيهات التكيّف ═══\n- نوع الشخصية: ${profile.personaType}\n- اللهجة المفضلة: ${profile.dialect}\n- القيادة: ${profile.leadership}/100 | العناد: ${profile.stubbornness}/100 | التحليل: ${profile.analytical}/100\n- عدّل نبرتك لتكمل شخصية المستخدم — لو قائد، كون مختصر وحازم؛ لو عاطفي، كون داعم ودافي.\n- ناديه باسم "${profile.name}" مرة واحدة كحد أقصى في الرد، كأخ أكبر ثقة.\n- ارفع عداد التفاعلات.`;
+         systemPrompt += personalityAddon;
+         await db.personalityProfile.update({
+           where: { userId: user.id },
+           data: { interactionCount: { increment: 1 } },
+         }).catch(() => {});
+       }
+     } catch (profileError) {
+       console.warn('[Chat] Personality profile injection failed:', profileError);
+     }
+   }
+   ```
+
+❌ Gaps in current injection:
+   1. Only 3 of 7 traits are surfaced (leadership, stubbornness, analytical).
+      Missing: emotional, sociability, discipline, humor.
+   2. driversJson, preferencesJson, triggersJson are persisted to DB but NEVER
+      injected — the AI doesn't see them.
+   3. There's a richer, purpose-built `buildPersonalitySystemPrompt()` in
+      src/lib/anzaro-llm.ts (lines 78-135) that handles dialect maps, per-persona
+      tone guides, and conditional trait directives. It is NOT called by the chat
+      stream route — only the simpler `complete()` function is used in other places.
+   4. `chatWithPersonality()` in src/lib/anzaro-llm.ts (lines 137-150) is also
+      never called by the main chat route.
+
+❌ Other findings:
+   - src/lib/anzaro-control-engine.ts → executeIntent() does NOT use personality
+     for device/scene decisions. Device resolution is purely alias-based. This is
+     acceptable — device control doesn't need tone adaptation — but scene selection
+     COULD benefit from persona (e.g., "creative" persona → suggest "focus" scene
+     with music). Mark as future enhancement.
+   - src/lib/anzaro-smart-ball-detector.ts imports buildPersonalitySystemPrompt
+     but never calls it (dead import — clean up).
+   - src/app/api/anzaro/proactive/route.ts uses `complete()` directly with a
+     minimal persona summary — does NOT use buildPersonalitySystemPrompt. The
+     nudge it generates is therefore only weakly personality-aware (just personaType
+     + discipline + drivers).
+
+FIX — Upgrade the chat stream injection to use the full buildPersonalitySystemPrompt:
+
+File: /home/z/my-project/src/app/api/chat/stream/route.ts
+Replace lines 629-648 with:
+
+```ts
+// ── Personality Profile Injection (Smart Ball Adaptive Mirroring) ──
+// لو المستخدم عمل personality onboarding، حقن الـ user_personality.md
+// في الـ system prompt عشان الـ AI يكيّف نبرته ولهجته حسب شخصية المستخدم
+if (user?.id) {
+  try {
+    const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } });
+    if (profile) {
+      // Parse the structured JSON fields (drivers / preferences / triggers)
+      let drivers: string[] = [];
+      let preferences: string[] = [];
+      let triggers: string[] = [];
+      try { drivers = JSON.parse(profile.driversJson || '[]'); } catch {}
+      try { preferences = JSON.parse(profile.preferencesJson || '[]'); } catch {}
+      try { triggers = JSON.parse(profile.triggersJson || '[]'); } catch {}
+
+      // Use the canonical Anzaro personality-aware system prompt builder.
+      // This adds: dialect map, per-persona tone guide, conditional trait
+      // directives (leadership>=70 → decision-maker, analytical>=70 → data, etc.),
+      // drivers, preferences, triggers, and the full markdown profile.
+      const { buildPersonalitySystemPrompt } = await import('@/lib/anzaro-llm');
+      const personalityPrompt = buildPersonalitySystemPrompt({
+        name: profile.name,
+        personaType: profile.personaType,
+        dialect: profile.dialect,
+        traits: {
+          leadership: profile.leadership,
+          stubbornness: profile.stubbornness,
+          analytical: profile.analytical,
+          emotional: profile.emotional,
+          sociability: profile.sociability,
+          discipline: profile.discipline,
+          humor: profile.humor,
+        },
+        drivers,
+        preferences,
+        triggers,
+        markdown: profile.markdown,
+        activeContext: undefined, // populated downstream by RAG / Drive / search blocks above
+      });
+
+      // Replace the boilerplate "You are Anzaro..." header that buildSystemPrompt
+      // emitted with the personality-aware version, then keep all the other
+      // capability / Drive / RAG / search additions that were appended below.
+      systemPrompt = personalityPrompt + '\n\n' + systemPrompt;
+
+      // Increment interaction count (Phase 7.1 — adaptive memory)
+      await db.personalityProfile.update({
+        where: { userId: user.id },
+        data: { interactionCount: { increment: 1 } },
+      }).catch(() => {});
+      console.log(`[Chat] Personality profile injected: ${profile.personaType}, interaction #${profile.interactionCount + 1}`);
+    }
+  } catch (profileError) {
+    console.warn('[Chat] Personality profile injection failed:', profileError);
+  }
+}
+```
+
+Why prepend rather than append? buildPersonalitySystemPrompt returns a self-contained
+system prompt that already includes the markdown profile and trait directives. Appending
+it at the end would dilute it behind all the capability/drive/search blocks. Prepending
+puts the personality framing first, then the capability rules follow — matching how the
+canonical Anzaro prompt was designed in src/lib/anzaro-llm.ts.
+
+ALTERNATIVE MINIMAL FIX (if you don't want to import buildPersonalitySystemPrompt):
+
+Just expand the inline personalityAddon string to cover all 7 traits + drivers + prefs:
+
+```ts
+const personalityAddon = `\n\n═══ ملف شخصية المستخدم (user_personality.md) ═══\n${profile.markdown}\n\n═══ توجيهات التكيّف ═══\n- نوع الشخصية: ${profile.personaType}\n- اللهجة المفضلة: ${profile.dialect}\n- القيادة: ${profile.leadership}/100 | العناد: ${profile.stubbornness}/100 | التحليل: ${profile.analytical}/100 | العاطفة: ${profile.emotional}/100 | الاجتماعية: ${profile.sociability}/100 | الانضباط: ${profile.discipline}/100 | الفكاهة: ${profile.humor}/100\n- المحركات (drivers): ${(JSON.parse(profile.driversJson || '[]')).join('، ') || 'n/a'}\n- التفضيلات: ${(JSON.parse(profile.preferencesJson || '[]')).join('، ') || 'n/a'}\n- المثيرات للتجنب/الدعم: ${(JSON.parse(profile.triggersJson || '[]')).join('، ') || 'n/a'}\n- عدّل نبرتك لتكمل شخصية المستخدم — لو قائد، كون مختصر وحاسم؛ لو عاطفي، كون داعم ودافي؛ لو تحليلي، استخدم أرقام ونقاط منظمة.\n- ناديه باسم "${profile.name}" مرة واحدة كحد أقصى في الرد، كأخ أكبر ثقة.`;
+systemPrompt += personalityAddon;
+```
+
+Recommended: use the buildPersonalitySystemPrompt version. It already encodes the
+tone guides and trait directives (e.g. "if stubbornness >= 70, don't argue — present
+facts neutrally") which the inline string doesn't.
+
+╔──────────────────────────────────────────────────────────────────╗
+║ AREA 3 — Onboarding Trigger After Login                         ║
+╚──────────────────────────────────────────────────────────────────╝
+
+CURRENT STATE: ✅ WORKING CORRECTLY
+
+- src/app/page.tsx (lines 54-79) runs the onboarding check after auth:
+    useEffect(() => {
+      if (!isAuthenticated || initializing) return;
+      const checkOnboarding = async () => {
+        try {
+          const res = await authFetch('/api/anzaro/personality/profile');
+          if (res.ok) {
+            const data = await res.json();
+            if (!data.profile) {
+              setNeedsOnboarding(true);  // no profile → show wizard
+            } else {
+              setNeedsOnboarding(false);
+            }
+          } else {
+            setNeedsOnboarding(false);   // API fail → don't block
+          }
+        } catch {
+          setNeedsOnboarding(false);
+        }
+      };
+      checkOnboarding();
+    }, [isAuthenticated, initializing]);
+
+- If needsOnboarding is true, the OnboardingFlow component renders (lines 115-124).
+- On onComplete(), needsOnboarding flips to false → main ChatApp renders.
+
+- The previously-reported "req is not defined" bug in the profile endpoint is FIXED.
+  Current code at src/app/api/anzaro/personality/profile/route.ts (lines 5-14):
+    export async function GET(req: NextRequest) {
+      try {
+        const { user, response: authResp } = await requireAnzaroUser(req); if (authResp) return authResp
+        if (!user) return authResp!
+        const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } })
+        return NextResponse.json({ profile, user })
+      } catch (e) {
+        return NextResponse.json({ error: String(e) }, { status: 500 })
+      }
+    }
+  `req` is properly defined as a function parameter and passed to requireAnzaroUser.
+
+- Verified callers of /api/anzaro/personality/profile:
+    src/app/page.tsx:60            (onboarding trigger)
+    src/app/dashboard/page.tsx:43  (admin dashboard)
+    src/app/dashboard/page.tsx:83  (admin refresh)
+    src/components/chat/ChatHeader.tsx:772  (profile display)
+
+NO FIX NEEDED. The trigger flow is solid. Only minor hardening suggestions:
+
+  1. The check at page.tsx:60 swallows errors silently (sets needsOnboarding=false).
+     This is intentional (don't block on transient failures), but could log:
+        } catch (e) {
+          console.warn('[Onboarding] profile check failed:', e);
+          setNeedsOnboarding(false);
+        }
+     to make debugging easier when auth tokens expire mid-session.
+
+  2. After onboarding completes (onComplete callback at page.tsx:118-121), the
+     app currently just flips needsOnboarding=false. Consider also refreshing the
+     auth store so user.name/user.dialect update from the new profile (the POST
+     /api/anzaro/personality/onboard route already updates user.name + dialect +
+     themePreset in DB at lines 90-93). A one-line checkAuth() call would do it:
+        onComplete={() => {
+          setNeedsOnboarding(false);
+          checkAuth();  // refresh user.name/dialect/themePreset
+        }}
+
+═══════════════════════════════════════════════════════════════════
+ SUMMARY TABLE
+═══════════════════════════════════════════════════════════════════
+
+| Area                          | Status         | Fix Needed? |
+|-------------------------------|----------------|-------------|
+| 1. Question randomization     | ❌ Not done    | YES — shuffle in GET endpoint (Fisher-Yates, demographic first) |
+| 2. Personality in AI prompt   | ⚠️ Partial     | YES — upgrade to use buildPersonalitySystemPrompt + parse JSON fields |
+| 3. Onboarding trigger         | ✅ Working     | NO (only minor logging/refresh hardening) |
+
+═══════════════════════════════════════════════════════════════════
+ NEXT ACTIONS (priority order)
+═══════════════════════════════════════════════════════════════════
+
+1. APPLY the Area 1 fix to src/app/api/anzaro/personality/onboard/route.ts
+   (5-min change, zero risk — questions are keyed by id on submission).
+
+2. APPLY the Area 2 fix (full version with buildPersonalitySystemPrompt) to
+   src/app/api/chat/stream/route.ts lines 629-648. This is the highest-impact
+   change — it makes the AI actually adapt its tone per persona and surface
+   drivers/preferences/triggers that are currently dead data in the DB.
+
+3. CLEAN UP the dead import in src/lib/anzaro-smart-ball-detector.ts (line 4) —
+   remove `buildPersonalitySystemPrompt` from the import since it's never called
+   there. (Or wire it up if smart-ball detector should be personality-aware.)
+
+4. CONSIDER (Phase 7.x future enhancement) — make executeIntent in
+   anzaro-control-engine.ts accept the user's personaType so scene selection can
+   bias toward the user's natural drivers (e.g., disciplined user → focus scene
+   suggestion). Not a regression — just a future opportunity.
+
+5. (Optional) Add a small log line in page.tsx catch block for Area 3 debugging.
+
+— End of audit —

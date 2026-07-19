@@ -627,20 +627,49 @@ export async function POST(request: NextRequest) {
     const searchPerformed = promptResult.searchPerformed;
 
     // ── Personality Profile Injection (Smart Ball Adaptive Mirroring) ──
-    // لو المستخدم عمل personality onboarding، حقن الـ user_personality.md
-    // في الـ system prompt عشان الـ AI يكيّف نبرته ولهجته حسب شخصية المستخدم
+    // V.16: Full personality integration — uses buildPersonalitySystemPrompt()
+    // so ALL 7 traits + drivers + preferences + triggers + persona tone guide
+    // are injected. The AI adapts dialect, tone, and approach per user.
     if (user?.id) {
       try {
         const profile = await db.personalityProfile.findUnique({ where: { userId: user.id } });
         if (profile) {
-          const personalityAddon = `\n\n═══ ملف شخصية المستخدم (user_personality.md) ═══\n${profile.markdown}\n\n═══ توجيهات التكيّف ═══\n- نوع الشخصية: ${profile.personaType}\n- اللهجة المفضلة: ${profile.dialect}\n- القيادة: ${profile.leadership}/100 | العناد: ${profile.stubbornness}/100 | التحليل: ${profile.analytical}/100\n- عدّل نبرتك لتكمل شخصية المستخدم — لو قائد، كون مختصر وحاسم؛ لو عاطفي، كون داعم ودافي.\n- ناديه باسم "${profile.name}" مرة واحدة كحد أقصى في الرد، كأخ أكبر ثقة.\n- ارفع عداد التفاعلات.`;
-          systemPrompt += personalityAddon;
+          // Parse the JSON arrays stored during onboarding
+          let drivers: string[] = [];
+          let preferences: string[] = [];
+          let triggers: string[] = [];
+          try { drivers = JSON.parse(profile.driversJson || '[]'); } catch {}
+          try { preferences = JSON.parse(profile.preferencesJson || '[]'); } catch {}
+          try { triggers = JSON.parse(profile.triggersJson || '[]'); } catch {}
+
+          const { buildPersonalitySystemPrompt } = await import('@/lib/anzaro-llm');
+          const personalityPrompt = buildPersonalitySystemPrompt({
+            name: profile.name,
+            personaType: profile.personaType,
+            dialect: profile.dialect,
+            traits: {
+              leadership: profile.leadership,
+              stubbornness: profile.stubbornness,
+              analytical: profile.analytical,
+              emotional: profile.emotional,
+              sociability: profile.sociability,
+              discipline: profile.discipline,
+              humor: profile.humor,
+            },
+            drivers,
+            preferences,
+            triggers,
+            markdown: profile.markdown,
+          });
+          // Prepend personality prompt so it shapes the AI's tone from the start
+          systemPrompt = personalityPrompt + '\n\n' + systemPrompt;
+
           // Increment interaction count (Phase 7.1 — adaptive memory)
           await db.personalityProfile.update({
             where: { userId: user.id },
             data: { interactionCount: { increment: 1 } },
           }).catch(() => {});
-          console.log(`[Chat] Personality profile injected: ${profile.personaType}, interaction #${profile.interactionCount + 1}`);
+          console.log(`[Chat] Personality profile injected: persona=${profile.personaType}, dialect=${profile.dialect}, interaction #${profile.interactionCount + 1}`);
         }
       } catch (profileError) {
         console.warn('[Chat] Personality profile injection failed:', profileError);
