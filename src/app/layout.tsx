@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { DirectionProvider } from "@/components/providers/direction-provider";
 import { FixTransparentColors } from "@/components/FixTransparentColors";
 import { ErrorSuppressor } from "@/components/ErrorSuppressor";
+import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -85,6 +86,7 @@ export default function RootLayout({
             <FixTransparentColors />
       <ErrorSuppressor />
             {children}
+            <PwaInstallPrompt />
           </DirectionProvider>
           <Toaster
             position="top-center"
