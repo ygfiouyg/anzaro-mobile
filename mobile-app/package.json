@@ -1,6 +1,6 @@
 {
   "name": "anzaro-mobile",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "main": "src/App.tsx",
   "scripts": {
     "start": "expo start",
@@ -14,6 +14,7 @@
     "expo-constants": "~16.0.0",
     "expo-haptics": "~13.0.0",
     "expo-secure-store": "~13.0.0",
+    "expo-splash-screen": "~0.27.0",
     "react": "18.2.0",
     "react-native": "0.74.5",
     "@react-navigation/native": "6.1.17",

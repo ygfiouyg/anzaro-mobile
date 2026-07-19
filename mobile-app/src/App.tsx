@@ -1,12 +1,18 @@
 /**
- * Anzaro Mobile — Root App (V.14 Crash-Safe)
+ * Anzaro Mobile — Root App (V.14 Bulletproof)
  * ============================================
- * Error Boundary + Safe Fallback + No external native deps that cause crashes.
- * Uses only @expo/vector-icons (built-in, no native module needed).
+ * Architecture:
+ * 1. SplashScreen.preventAutoHideAsync() — called BEFORE React mounts
+ * 2. Async hydration wrapper — all storage/DB calls inside useEffect
+ * 3. Safe null fallback — return null while !isReady (splash stays visible)
+ * 4. SplashScreen.hideAsync() — only called after hydration completes
+ * 5. NavigationContainer — completely decoupled from DB queries
+ * 6. ErrorBoundary — catches any render crash
  */
 
-import React, { Component, useState, useEffect } from 'react';
+import React, { Component, useState, useEffect, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +22,15 @@ import {
   ActivityIndicator, RefreshControl, TextInput, FlatList,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ═══════════════════════════════════════════════════
+// STEP 1: Prevent splash from auto-hiding BEFORE React mounts
+// This must be at module scope — runs synchronously on app start
+// ═══════════════════════════════════════════════════
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // V.14: Silent catch — preventAutoHideAsync can fail in some edge cases
+  // The app will still work, just splash might flash briefly
+});
 
 // ═══════════════════════════════════════════════════
 // CONSTANTS
@@ -36,7 +51,7 @@ const C = {
 };
 
 // ═══════════════════════════════════════════════════
-// ERROR BOUNDARY — catches any render crash
+// ERROR BOUNDARY
 // ═══════════════════════════════════════════════════
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
   state = { hasError: false, error: '' };
@@ -46,7 +61,7 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
   }
 
   componentDidCatch(error: Error) {
-    console.error('[Anzaro] Root crash caught:', error?.message);
+    console.error('[Anzaro] Root crash:', error?.message);
   }
 
   render() {
@@ -56,7 +71,7 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
           <View style={styles.errorOrb} />
           <Text style={styles.errorTitle}>Anzaro</Text>
           <Text style={styles.errorText}>حدث خطأ غير متوقع</Text>
-          <Text style={styles.errorDetail}>{this.state.error}</Text>
+          <Text style={styles.errorDetail} numberOfLines={3}>{this.state.error}</Text>
           <TouchableOpacity
             style={styles.retryBtn}
             onPress={() => this.setState({ hasError: false, error: '' })}
@@ -71,20 +86,6 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 }
 
 // ═══════════════════════════════════════════════════
-// SAFE LOADING SCREEN — never return null
-// ═══════════════════════════════════════════════════
-function LoadingScreen() {
-  return (
-    <View style={styles.loadingContainer}>
-      <View style={styles.loadingOrb} />
-      <Text style={styles.loadingTitle}>Anzaro</Text>
-      <Text style={styles.loadingText}>جاري التحميل...</Text>
-      <ActivityIndicator size="small" color={C.primary} style={{ marginTop: 12 }} />
-    </View>
-  );
-}
-
-// ═══════════════════════════════════════════════════
 // DASHBOARD SCREEN
 // ═══════════════════════════════════════════════════
 function DashboardScreen() {
@@ -92,16 +93,19 @@ function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasIdentity, setHasIdentity] = useState<boolean | null>(null);
 
-  const checkAll = async () => {
+  const checkAll = useCallback(async () => {
     setRefreshing(true);
-    // Check cloud
+    // Check cloud — wrapped in try/catch, never crashes
     try {
-      const res = await fetch(`${ANZARO_API}/api/status`, { signal: AbortSignal.timeout(5000) });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${ANZARO_API}/api/status`, { signal: controller.signal });
+      clearTimeout(timeout);
       setConnected(res?.ok ?? false);
     } catch {
       setConnected(false);
     }
-    // Check identity
+    // Check identity — wrapped in try/catch
     try {
       const stored = await AsyncStorage?.getItem?.('@anzaro_identity');
       setHasIdentity(!!stored);
@@ -109,9 +113,11 @@ function DashboardScreen() {
       setHasIdentity(false);
     }
     setRefreshing(false);
-  };
+  }, []);
 
-  useEffect(() => { checkAll(); }, []);
+  useEffect(() => {
+    checkAll();
+  }, [checkAll]);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -119,14 +125,12 @@ function DashboardScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={checkAll} tintColor={C.primary} />}
       >
-        {/* Orb */}
         <View style={styles.orb}>
           <View style={styles.orbInner} />
         </View>
         <Text style={styles.brandTitle}>Anzaro</Text>
         <Text style={styles.brandSub}>الكرة الذكية</Text>
 
-        {/* Cloud Status */}
         <View style={[styles.card, connected === false && styles.cardWarning, connected === true && styles.cardSuccess]}>
           <View style={styles.cardRow}>
             <Ionicons name={connected === true ? 'cloud' : connected === false ? 'cloud-offline' : 'hourglass'} size={20} color={connected === true ? C.success : connected === false ? C.warning : C.muted} />
@@ -138,7 +142,6 @@ function DashboardScreen() {
           <Text style={styles.cardUrl}>{ANZARO_API}</Text>
         </View>
 
-        {/* Identity */}
         <View style={styles.card}>
           <View style={styles.cardRow}>
             <Ionicons name="person-circle" size={20} color={C.primary} />
@@ -147,7 +150,6 @@ function DashboardScreen() {
           </View>
         </View>
 
-        {/* Quick Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Ionicons name="cube" size={16} color={C.primaryL} />
@@ -171,18 +173,18 @@ function DashboardScreen() {
 }
 
 // ═══════════════════════════════════════════════════
-// CHAT SCREEN (simplified, crash-safe)
+// CHAT SCREEN
 // ═══════════════════════════════════════════════════
 interface Msg { id: string; role: 'user' | 'assistant'; text: string; }
 
 function ChatScreen() {
   const [messages, setMessages] = useState<Msg[]>([
-    { id: '1', role: 'assistant', text: 'أهلاً! أنا أنظاره. كيف أقدر أساعدك النهاردة؟ 🤖' },
+    { id: '1', role: 'assistant', text: 'أهلاً! أنا أنظاره. كيف أقدر أساعدك؟ 🤖' },
   ]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const send = async () => {
+  const send = useCallback(async () => {
     const text = input?.trim();
     if (!text || sending) return;
 
@@ -191,9 +193,10 @@ function ChatScreen() {
     setInput('');
     setSending(true);
 
-    // Try to call Cloud Brain
     try {
       const token = await AsyncStorage?.getItem?.('@anzaro_token');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
       const res = await fetch(`${ANZARO_API}/api/chat/stream`, {
         method: 'POST',
         headers: {
@@ -201,8 +204,9 @@ function ChatScreen() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ message: text, model: 'delta-general', language: 'ar' }),
-        signal: AbortSignal.timeout(30000),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (res?.ok && res.body) {
         const reader = res.body.getReader();
@@ -212,36 +216,36 @@ function ChatScreen() {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk?.split('\n') ?? []) {
-            if (line?.startsWith('data: ')) {
-              const data = line.slice(6).trim();
-              if (data === '[DONE]') continue;
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed?.content) fullText += parsed.content;
-              } catch {}
-            }
+          const lines = chunk?.split('\n') ?? [];
+          for (const line of lines) {
+            if (!line?.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed?.content) fullText += parsed.content;
+            } catch {}
           }
         }
         if (fullText) {
           setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: fullText }]);
         } else {
-          setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'تمام، فهمت 👍' }]);
+          setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'تمام 👍' }]);
         }
       } else {
-        setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'مش قادر أوصل للسيرفر دلوقتي. جرّب تاني.' }]);
+        setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'مش قادر أوصل للسيرفر. جرّب تاني.' }]);
       }
     } catch {
-      setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'فيه مشكلة في النت. اتأكد من الاتصال.' }]);
+      setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', text: 'فيه مشكلة في النت.' }]);
     }
     setSending(false);
-  };
+  }, [input, sending]);
 
-  const renderMsg = ({ item }: { item: Msg }) => (
+  const renderMsg = useCallback(({ item }: { item: Msg }) => (
     <View style={[styles.msgBubble, item.role === 'user' ? styles.msgUser : styles.msgAI]}>
       <Text style={styles.msgText}>{item.text}</Text>
     </View>
-  );
+  ), []);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -250,8 +254,6 @@ function ChatScreen() {
         keyExtractor={item => item.id}
         renderItem={renderMsg}
         contentContainerStyle={{ padding: 16, gap: 8 }}
-        inverted={false}
-        onContentSizeChange={() => {}}
       />
       <View style={styles.inputBar}>
         <TextInput
@@ -263,7 +265,11 @@ function ChatScreen() {
           multiline
           editable={!sending}
         />
-        <TouchableOpacity style={[styles.sendBtn, (!input?.trim() || sending) && styles.sendDisabled]} onPress={send} disabled={!input?.trim() || sending}>
+        <TouchableOpacity
+          style={[styles.sendBtn, (!input?.trim() || sending) && styles.sendDisabled]}
+          onPress={send}
+          disabled={!input?.trim() || sending}
+        >
           {sending ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
         </TouchableOpacity>
       </View>
@@ -272,7 +278,7 @@ function ChatScreen() {
 }
 
 // ═══════════════════════════════════════════════════
-// HOME ASSISTANT SCREEN
+// HOME SCREEN
 // ═══════════════════════════════════════════════════
 function HomeScreen() {
   const [devices, setDevices] = useState([
@@ -286,14 +292,14 @@ function HomeScreen() {
   ]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const toggle = (id: string) => {
+  const toggle = useCallback((id: string) => {
     setDevices(prev => prev.map(d => d.id === id ? { ...d, state: d.state === 'on' ? 'off' : 'on' } : d));
-  };
+  }, []);
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1000);
-  };
+  }, []);
 
   const domainIcons: Record<string, string> = {
     light: 'bulb', switch: 'power', climate: 'snow', sensor: 'speedometer',
@@ -341,15 +347,17 @@ function SettingsScreen() {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    AsyncStorage?.getItem?.('@anzaro_token').then(t => setToken(t)).catch(() => setToken(null));
+    AsyncStorage?.getItem?.('@anzaro_token')
+      .then(t => setToken(t))
+      .catch(() => setToken(null));
   }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await AsyncStorage?.multiRemove?.(['@anzaro_token', '@anzaro_identity']);
     } catch {}
     setToken(null);
-  };
+  }, []);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -359,7 +367,7 @@ function SettingsScreen() {
           <View style={styles.cardRow}>
             <Ionicons name="information-circle" size={20} color={C.primary} />
             <Text style={styles.cardLabel}>التطبيق</Text>
-            <Text style={styles.cardValue}>Anzaro v2.1.0</Text>
+            <Text style={styles.cardValue}>Anzaro v2.2.0</Text>
           </View>
         </View>
         <View style={styles.card}>
@@ -389,32 +397,11 @@ function SettingsScreen() {
 }
 
 // ═══════════════════════════════════════════════════
-// ROOT APP
+// NAVIGATION (completely decoupled from DB queries)
 // ═══════════════════════════════════════════════════
 const Tab = createBottomTabNavigator();
 
-function AppContent() {
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    // V.14: Safe hydration — never crash on null storage
-    const init = async () => {
-      try {
-        // Test AsyncStorage access
-        await AsyncStorage?.getItem?.('@anzaro_init_test');
-      } catch {}
-      setReady(true);
-    };
-    // Short timeout fallback — don't hang forever
-    const timeout = setTimeout(() => setReady(true), 2000);
-    init();
-    return () => clearTimeout(timeout);
-  }, []);
-
-  if (!ready) {
-    return <LoadingScreen />;
-  }
-
+function AppNavigator() {
   return (
     <NavigationContainer>
       <StatusBar style="light" />
@@ -470,6 +457,56 @@ function AppContent() {
   );
 }
 
+// ═══════════════════════════════════════════════════
+// ROOT APP — Bulletproof async hydration
+// ═══════════════════════════════════════════════════
+function AppContent() {
+  const [isReady, setIsReady] = useState(false);
+
+  // STEP 2: Async hydration wrapper — all storage checks inside useEffect
+  useEffect(() => {
+    const bootstrap = async () => {
+      // V.14: All native storage calls wrapped in try/catch
+      // Nothing synchronous — everything is inside this async function
+      try {
+        // Test AsyncStorage access (don't crash if it fails)
+        await AsyncStorage?.getItem?.('@anzaro_init_test');
+      } catch {
+        // Storage error — continue anyway, app will work in guest mode
+      }
+
+      // Minimum splash time for smooth UX (prevents flash)
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // STEP 3: Mark as ready — safe to render
+      setIsReady(true);
+    };
+
+    // Hard timeout — if bootstrap hangs, force ready after 3s
+    const hardTimeout = setTimeout(() => {
+      setIsReady(true);
+    }, 3000);
+
+    bootstrap();
+
+    return () => clearTimeout(hardTimeout);
+  }, []);
+
+  // STEP 3: Safe null fallback — return null while !isReady
+  // Splash screen stays visible because we called preventAutoHideAsync
+  if (!isReady) {
+    return null; // Safe — splash is still showing natively
+  }
+
+  // STEP 4: Hide splash screen after hydration — wrapped in try/catch
+  SplashScreen.hideAsync().catch(() => {
+    // V.14: If hideAsync fails, the splash will auto-hide eventually
+  });
+
+  // STEP 5: Navigation decoupled — no DB queries at root level
+  return <AppNavigator />;
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -484,7 +521,6 @@ export default function App() {
 // STYLES
 // ═══════════════════════════════════════════════════
 const styles = StyleSheet.create({
-  // Error
   errorContainer: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 32 },
   errorOrb: { width: 60, height: 60, borderRadius: 30, backgroundColor: C.danger, marginBottom: 16 },
   errorTitle: { color: C.text, fontSize: 24, fontWeight: 'bold' },
@@ -492,20 +528,12 @@ const styles = StyleSheet.create({
   errorDetail: { color: C.danger, fontSize: 11, marginTop: 4, textAlign: 'center' },
   retryBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: C.primary, borderRadius: 12 },
   retryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  // Loading
-  loadingContainer: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
-  loadingOrb: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.primary, marginBottom: 16, shadowColor: C.primary, shadowOpacity: 0.6, shadowRadius: 20, elevation: 10 },
-  loadingTitle: { color: C.text, fontSize: 22, fontWeight: 'bold' },
-  loadingText: { color: C.muted, fontSize: 13, marginTop: 4 },
-  // Screen
   screen: { flex: 1, backgroundColor: C.bg },
   scrollContent: { padding: 20, alignItems: 'center' },
-  // Brand
   orb: { width: 80, height: 80, borderRadius: 40, marginBottom: 16, justifyContent: 'center', alignItems: 'center' },
   orbInner: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.primary, shadowColor: C.primary, shadowOpacity: 0.5, shadowRadius: 25, elevation: 12 },
   brandTitle: { color: C.text, fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
   brandSub: { color: C.muted, fontSize: 14, marginBottom: 24 },
-  // Card
   card: { width: '100%', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.border },
   cardWarning: { borderColor: C.warning + '30' },
   cardSuccess: { borderColor: C.success + '30' },
@@ -515,20 +543,16 @@ const styles = StyleSheet.create({
   valueSuccess: { color: C.success },
   valueWarning: { color: C.warning },
   cardUrl: { color: C.muted, fontSize: 10, marginTop: 6, marginLeft: 30 },
-  // Stats
   statsRow: { flexDirection: 'row', gap: 8, width: '100%' },
   statBox: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 },
   statValue: { color: C.text, fontSize: 20, fontWeight: 'bold' },
   statLabel: { color: C.muted, fontSize: 10 },
-  // Section
   sectionTitle: { color: C.text, fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  // Devices
   deviceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   deviceCard: { width: 150, backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.border },
   deviceIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   deviceName: { color: C.text, fontSize: 13, fontWeight: '600' },
   deviceState: { fontSize: 11, marginTop: 2, textTransform: 'capitalize' },
-  // Chat
   msgBubble: { maxWidth: '80%', borderRadius: 14, padding: 12, marginBottom: 8 },
   msgUser: { alignSelf: 'flex-end', backgroundColor: C.primary },
   msgAI: { alignSelf: 'flex-start', backgroundColor: C.card },
@@ -537,7 +561,6 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: C.bg, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: C.text, fontSize: 14, borderWidth: 1, borderColor: C.border, maxHeight: 80 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
   sendDisabled: { opacity: 0.4 },
-  // Settings
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 12, padding: 14, marginTop: 8 },
   logoutText: { color: C.danger, fontSize: 15, fontWeight: '600' },
   versionText: { color: C.muted, fontSize: 11, textAlign: 'center', marginTop: 20 },
