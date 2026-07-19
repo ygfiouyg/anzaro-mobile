@@ -15,6 +15,8 @@ model User {
   role          String    @default("user") // "user" | "admin"
   avatar        String?
   language      String    @default("ar")   // "ar" | "en" | "egyptian"
+  dialect       String?   @default("egyptian") // "egyptian" | "khaleeji" | "levantine" | "msa" | "english"
+  themePreset   String?   @default("aurora")   // "aurora" | "leadership" | "creative" | "calm"
   streak        Int       @default(0)      // نظام الرتب
   maxTokens     Int       @default(60000)  // Admin-controlled max tokens per account (platform max: 60000)
   isActive      Boolean   @default(true)

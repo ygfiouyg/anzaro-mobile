@@ -27,16 +27,43 @@ interface Tool {
   isEnabled: boolean
 }
 
-export function McpToolsPanel() {
-  const [tools, setTools] = useState<Tool[]>([])
-  const [testing, setTesting] = useState<string | null>(null)
+// Static tool catalog — matches the 3 real MCP endpoints under /api/anzaro/mcp/
+const STATIC_TOOLS: Tool[] = [
+  {
+    id: 'prayer-times',
+    name: 'prayer_times',
+    description: 'مواعيد الصلاة لأي مدينة في العالم — بيانات من Aladhan API',
+    category: 'home',
+    endpoint: '/api/anzaro/mcp/prayer',
+    isLocal: false,
+    latencyMs: 280,
+    isEnabled: true,
+  },
+  {
+    id: 'weather',
+    name: 'weather',
+    description: 'حالة الطقس الحالية + التوقعات — Open-Meteo (مجاني، بدون مفتاح)',
+    category: 'home',
+    endpoint: '/api/anzaro/mcp/weather',
+    isLocal: false,
+    latencyMs: 190,
+    isEnabled: true,
+  },
+  {
+    id: 'web-search',
+    name: 'web_search',
+    description: 'بحث حقيقي في الإنترنت — Nestor Aggregator (مجاني، بدون مفتاح)',
+    category: 'search',
+    endpoint: '/api/anzaro/mcp/search',
+    isLocal: false,
+    latencyMs: 450,
+    isEnabled: true,
+  },
+]
 
-  useEffect(() => {
-    fetch('/api/anzaro/mcp/tools')
-      .then((r) => r.json())
-      .then((d) => setTools(d.tools || []))
-      .catch(() => {})
-  }, [])
+export function McpToolsPanel() {
+  const [tools] = useState<Tool[]>(STATIC_TOOLS)
+  const [testing, setTesting] = useState<string | null>(null)
 
   async function testTool(tool: Tool) {
     setTesting(tool.id)

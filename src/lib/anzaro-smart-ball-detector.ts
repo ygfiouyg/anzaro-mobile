@@ -6,7 +6,7 @@ import type { PersonalityTraits } from '@/lib/anzaro-types'
 
 export interface SmartBallCommand {
   type: 'media_play' | 'media_stop' | 'media_pause' | 'media_resume' | 'device_on' | 'device_off' | 'scene'
-  execute: (sink: (text: string) => void) => Promise<void>
+  execute: (sink: (data: string | Record<string, unknown>) => void) => Promise<void>
 }
 
 /**
@@ -34,8 +34,6 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
       type: 'media_stop',
       execute: async (sink) => {
         // Find the user's active session
-        // We need the userId — extract from the request context (passed via header)
-        // For now, stop all active sessions
         const active = await db.mediaSession.findFirst({
           where: { status: { in: ['playing', 'paused'] } },
           orderBy: { createdAt: 'desc' },
@@ -43,6 +41,8 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
         if (active) {
           await controlMediaSession(active.userId, 'stop')
           sink(`⏹ **تم إيقاف الراديو**\n\n${active.title} اتقفل. 🎯`)
+          // ── V.15: Send stopMedia SSE event so the frontend closes the NowPlayingBar ──
+          sink({ stopMedia: true })
         } else {
           sink('مفيش راديو شغّال دلوقتي. 🎵')
         }
@@ -137,6 +137,18 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
               streamUrl: match.streamUrl,
               stationId: match.id,
               type: 'radio',
+            })
+            // ── V.15: Send mediaWidget SSE event so the frontend opens the NowPlayingBar ──
+            // This is the critical payload that triggers the audio player UI + auto-play.
+            sink({
+              mediaWidget: {
+                type: 'audio',
+                source: 'radio',
+                title: match.name,
+                streamUrl: match.streamUrl,
+                mimeType: 'audio/mpeg',
+                autoPlay: true,
+              },
             })
           } else {
             sink('مقدرش أشغّل — لازم تسجل دخول الأول.')

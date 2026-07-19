@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireAnzaroUser } from '@/lib/anzaro-auth-helper'
 import { db } from '@/lib/db'
 import { complete } from '@/lib/anzaro-llm'
 
 // Phase 7.2: proactive triggers — generate a brotherly nudge based on profile + time
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const { user, response: authResp } = await requireAnzaroUser(req); if (authResp) return authResp
     if (!user) return authResp!

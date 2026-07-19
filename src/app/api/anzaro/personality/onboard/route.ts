@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'answers and name are required' }, { status: 400 })
     }
 
-    const { compilePersonalityMarkdown } = await import('@/lib/llm')
+    const { compilePersonalityMarkdown } = await import('@/lib/anzaro-llm')
     const compiled = await compilePersonalityMarkdown({
       name: body.name,
       age: body.age,

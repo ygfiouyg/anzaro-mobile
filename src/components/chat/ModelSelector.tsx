@@ -700,13 +700,13 @@ export function ModelSelector({ open, onOpenChange }: ModelSelectorProps) {
   // Determine the overall status indicator for the button
   const overallStatus = hfReport ? getOverallStatus(hfReport) : null;
 
-  // Check if activeModel is an HF model
-  const isHFModel = activeModel.startsWith('hf-chat:') || activeModel.startsWith('hf-image:') || activeModel.startsWith('hf-video:');
-  const currentModel = !isHFModel ? getModelById(activeModel) : undefined;
+  // Check if activeModel is an HF model (null-safe — activeModel can be null on first load)
+  const isHFModel = !!activeModel && (activeModel.startsWith('hf-chat:') || activeModel.startsWith('hf-image:') || activeModel.startsWith('hf-video:'));
+  const currentModel = !isHFModel && activeModel ? getModelById(activeModel) : undefined;
 
   // Get HF model display info
   const getHFModelDisplay = () => {
-    if (!isHFModel) return null;
+    if (!isHFModel || !activeModel) return null;
     const [prefix, ...rest] = activeModel.split(':');
     const modelId = rest.join(':');
     if (prefix === 'hf-chat' && hfChatModels?.[modelId]) {

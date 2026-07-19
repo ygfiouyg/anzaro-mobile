@@ -74,18 +74,24 @@ export function ConversationSidebar({ onClose }: { onClose?: () => void }) {
   async function deleteConversation(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     try {
-      await fetch('/api/conversations/delete', {
+      const res = await fetch('/api/anzaro/conversations/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       })
+      if (!res.ok) {
+        toast.error('فشل مسح المحادثة')
+        return
+      }
       if (id === conversationId) {
         clearMessages()
         setConversationId('')
       }
       refresh()
       toast.success('اتمسحت المحادثة')
-    } catch {}
+    } catch {
+      toast.error('خطأ في الاتصال')
+    }
   }
 
   return (

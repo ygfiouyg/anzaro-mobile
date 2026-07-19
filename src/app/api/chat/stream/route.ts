@@ -245,8 +245,13 @@ export async function POST(request: NextRequest) {
           const ballStream = new ReadableStream({
             async start(controller) {
               const encoder = new TextEncoder();
-              const sink = (text: string) => {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: text })}\n\n`));
+              // sink accepts either a string (text content) or an object (structured SSE event)
+              const sink = (data: string | Record<string, unknown>) => {
+                if (typeof data === 'string') {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: data })}\n\n`));
+                } else {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                }
               };
               try {
                 await ballCommand.execute(sink);
