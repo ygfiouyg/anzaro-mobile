@@ -1607,3 +1607,62 @@ NO FIX NEEDED. The trigger flow is solid. Only minor hardening suggestions:
 5. (Optional) Add a small log line in page.tsx catch block for Area 3 debugging.
 
 — End of audit —
+
+---
+Task ID: v16-personality-speedup
+Agent: main (Z.ai Code)
+Task: رفع التحديثات على HuggingFace + التأكد من ظهور الاختبار بعد الدخول + اختلاف الأسئلة + استخدام الـ AI لبيانات الاختبار + تغيير next dev للعادي
+
+Work Log:
+- حاولت تغيير `next dev` لإزالة `--webpack` (للتسريع بـ Turbopack)
+- اكتشفت إن Turbopack في Next.js 16.1.3 مش متوافق مع Tailwind v4 arbitrary values (`text-[hsl(var(--primary))]` → `Unexpected token Delim('.')`)
+- عدّلت `globals.css`: شيلت `@source not` lines (غير مدعومة في Turbopack) وحطيت `@source "../**/*.{ts,tsx,js,jsx}"`
+- Turbopack لسه بيفشل في CSS parsing رغم التعديل — ده bug معروف في Next.js 16.1.3 + Tailwind v4
+- **القرار**: رجّعت `--webpack` مؤقتاً لأن Turbopack مش متوافق بالكامل. لما Next.js 16.2+ يتصلح ممكن نرجّع Turbopack
+
+### V.16: Onboarding Question Shuffle
+- `src/app/api/anzaro/personality/onboard/route.ts` GET: أضفت `shuffleArray()` (Fisher-Yates)
+- الـ demographic (name, age, occupation, dialect) بتفضل الأول (prerequisites)
+- الـ 14 سؤال الباقي (psychological, driver, preference) بيتـ shuffle بشكل عشوائي لكل session
+- **النتيجة**: اتختبر 3 مرات — كل مرة بترجع ترتيب مختلف ✅ (`All different: True`)
+
+### V.16: Full Personality Injection in AI
+- `src/app/api/chat/stream/route.ts`: استبدلت الـ inline string المحدودة (3 traits) بـ `buildPersonalitySystemPrompt()` الكاملة
+- دلوقتي الـ AI بياخد:
+  - كل 7 traits (leadership, stubbornness, analytical, emotional, sociability, discipline, humor)
+  - drivers + preferences + triggers (من JSON arrays في الـ DB)
+  - persona tone guide (leader/analytical/creative/emotional/balanced)
+  - dialect instruction (egyptian/khaleeji/levantine/msa/english)
+  - trait directives الشرطية (لو leadership >= 70 → "Treat as decision-maker")
+  - markdown profile الكامل
+- الـ AI دلوقتي بيكيّف نبرته ولهجته وأسلوبه حسب شخصية المستخدم
+
+### Onboarding Trigger After Login
+- `src/app/page.tsx` السطر 54-79: الـ useEffect بيـ fetch `/api/anzaro/personality/profile` بعد ما `isAuthenticated` تبقى true
+- لو `data.profile === null` → `setNeedsOnboarding(true)` → بيظهر الـ `<OnboardingFlow>`
+- الـ profile API كان متصلح في الجلسة السابقة (BUG #1)
+- **اتاختبر**: لما الـ profile مش موجود، الـ API بترجع `{profile: null}` والـ condition `!data.profile` بيكون true
+
+### HuggingFace Push
+- عملت commit للتعديلات: `a711725 feat: V.16 — shuffle onboarding questions + full personality injection`
+- حاولت أرفع على `hf` remote بس مفيش HF_TOKEN متاح في البيئة الحالية
+- الجلسة السابقة كانت بتستخدم token بس مش متبقٍ في .env أو ~/.git-credentials
+- **الالتزام**: المستخدم محتاج يوفّر HF_TOKEN عشان يقدر يرفع
+
+### Verification Results:
+- ✅ Onboarding shuffle: 3 calls → 3 different orders (demographic first, rest shuffled)
+- ✅ Onboarding submit: `Success: True, Persona: analytical, Traits: L=4 A=5 E=3 D=4`
+- ✅ Chat stream: بيرجع `mediaWidget` مع `autoPlay: true` للـ radio commands
+- ✅ Chat stream: بيرجع `stopMedia: true` للـ stop commands
+- ✅ Profile API: `{profile: null}` لما مفيش، `{profile: {...}}` لما فيه
+- ✅ lint: 0 errors, 15 warnings (pre-existing)
+- ⚠️ Turbopack: مش متوافق مع Tailwind v4 (رجّعت --webpack)
+
+Stage Summary:
+- **الـ shuffle شغال**: الأسئلة بتختلف كل مرة (بعد الـ demographic الثابتة)
+- **الـ personality injection شغال**: الـ AI بياخد كل الـ traits + drivers + preferences + triggers
+- **الـ onboarding trigger شغال**: بيظهر لما الـ profile مش موجود
+- **next dev**: فضل `--webpack` لأن Turbopack مش متوافق مع Tailwind v4 CSS
+- **HF push**: محتاج HF_TOKEN — الـ commit جاهز في `a711725`
+
+*Last updated: 2025-01-30 (Round 24) · V.16: shuffle + personality injection + onboarding trigger verified*
