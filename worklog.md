@@ -2095,3 +2095,82 @@ Stage Summary:
 - **Better error UX**: Both `NowPlayingBar` and `AudioPlayer` now show "open in new tab" button on stream error so user can verify the URL externally.
 
 *Last updated: 2025-01-30 (radio-fix-1) · Radio station search + stream URLs fixed*
+
+---
+Task ID: v17-major-fixes
+Agent: main (Z.ai Code)
+Task: 6 إصلاحات رئيسية: ZAI routing، المشاعر، جهات الاتصال، الراديو، الصور/الفيديو، أسئلة الشخصية
+
+Work Log:
+- أطلقت 3 subagents بالتوازي: radio-fix، contacts-fix، imagevideo-fix
+- شخصياً اتعاملت مع: ZAI routing، المشاعر، أسئلة الشخصية
+
+### 1. ZAI_API_KEY Routing (V.17)
+- **المشكلة**: الـ ZAI path كان فيه `/* ZAI removed */` — موديلات عبس و glm-4-flash مش بتشتغل خالص
+- **الإصلاح**: أعدت تفعيل ZAI SDK لـ `primaryProvider === 'zhipuai'` بس
+  - streaming via `zai.chat.completions.create({ stream: true })`
+  - قراءة SSE chunks + إرسالها للـ frontend
+- **الـ FALLBACK_RESPONSE**: غيرتها من "ZAI_API_KEY مش متاح" لـ "مشكلة مؤقتة في الاتصال"
+- موديلات تانية (HuggingFace, Groq, إلخ) بتستخدم provider الخاص بيها
+
+### 2. Emotional Adaptation (V.17)
+- **المشكلة**: الـ AI مش بيكيّف نبرته حسب حالة المستخدم
+- **الإصلاح**: أضفت 6 emotions جديدة في `emotionMatrix`:
+  - `rude` (وقاحة) → AI بيرد بنفس الطاقة الوقحة (يا أخويا، ياسيدي)
+  - `lazy` (كسل) → AI بيهزّق وبيشجع (يا جدع قوم)
+  - `sad` (حزن) → AI بيراضي وبيدعم (أنا معاك)
+  - `angry` (غضب) → AI بيهدّي (خد نفس عميق)
+  - `affectionate` (ود) → AI بيرد بود (يا روحي)
+  - `stressed` (توتر) → AI بيرخّي (شرب شاية)
+- `getEmotionSupportPrefix()` دلوقتي بترجع tone guide مفصل لكل emotion
+
+### 3. Google Contacts (تم بواسطة subagent)
+- **المشكلة**: الـ AI كان بيطبع `{"tool":"google_contacts_reader","name":"محمد حامد"}` كنص
+- **الإصلاح**: أضيف top-level pre-scan layer يكتشف "هاتلي رقم X" وينفذ الأداة قبل الـ LLM
+- System prompt اتعدل: ممنوع الـ AI يكتب JSON كنص
+
+### 4. Radio Stations (تم بواسطة subagent)
+- **المشكلة**: stream URLs مكسورة + البحث مش بيلقى المحطة المطلوبة
+- **الإصلاح**: 
+  - 20 محطة متحقق منها (قرآن، موسيقى، أخبار)
+  - `matchStation()` بترجع null لو مفيش match (مش default)
+  - Smart Ball detector بيدور في DB + BUILTIN_STATIONS + category default
+  - إذاعة القرآن الرسمية المصرية: `stream.radiojar.com/8s5u5tpdtwzuv`
+
+### 5. Image/Video Generation (تم بواسطة subagent)
+- **المشكلة**: الصور مش بتتعمل + الفيديو بيرجع YouTube
+- **الإصلاح**:
+  - `getZAIClient` import اتضاف (كان ناقص → ReferenceError)
+  - CogView-3-Flash (صور) + CogVideoX-Flash (فيديو) من BigModel
+  - `media-intent-llm.ts`: generation intent guard يمنع "اعملي فيديو" من يروح YouTube
+  - async polling للفيديو (submit task → poll for result)
+
+### 6. Personality Quiz (V.17)
+- **المشكلة**: الأسئلة مش منطقية + الـ scale 1-5 مش مفهوم
+- **الإصلاح**:
+  - كل سؤال scale بقى فيه "1 = X • 5 = Y" في الـ questionAr
+  - `getScaleLabels()` function بتـ parse الـ labels من كل سؤال
+  - أضفت `preference_tone` سؤال جديد (أخ كبير/رسمي/صاحب/صريح)
+  - إجمالي 19 سؤال (بدل 18)
+  - خيارات أوضح وأكثر ارتباطاً بالواقع
+
+### Verification on HF Space:
+- ✅ Register/Login: شغال
+- ✅ Profile check: `None` (بيظهر الـ onboarding)
+- ✅ Onboarding questions: 19 سؤال
+- ✅ Radio "شغل قرآن من القاهرة": بيرجع mediaWidget + stream URL صحيح
+- ✅ lint: 0 errors
+
+### ملاحظة مهمة للمستخدم:
+**ZAI_API_KEY محتاج يتطبق كـ HF Space Secret**:
+1. روح لـ https://huggingface.co/spaces/kopabdo/DELTA_AI_V2/settings
+2. Variables and secrets → New secret
+3. Key: `ZAI_API_KEY` → Value: مفتاحك من https://open.bigmodel.cn
+4. الـ Space هيـ restart تلقائياً
+
+بدون الـ ZAI_API_KEY:
+- موديلات عبس + glm-4-flash مش هتشتغل (هتـ fallback لـ Pollinations)
+- توليد الصور/الفيديو مش هيتعمل
+- لكن باقي الموديلات (HuggingFace, Groq, إلخ) هتشتغل عادي
+
+*Last updated: 2025-01-30 (Round 28) · V.17: 6 major fixes deployed to HF*
