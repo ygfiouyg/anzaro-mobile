@@ -45,8 +45,12 @@ ENV SESSION_SECRET="anzaro-hf-space-secret-2025-stable"
 # Create db directory and push schema
 RUN mkdir -p /app/db && npx prisma db push --skip-generate 2>/dev/null || true
 
+# Pre-build the Next.js app so .next/ exists (fixes ENOENT required-server-files.json)
+RUN npx next build --webpack 2>&1 || echo "Build failed, will use dev mode"
+
 # Expose port
 EXPOSE 3000
 
-# Start the application (use next dev since we need runtime compilation for HF)
-CMD ["npx", "next", "dev", "-p", "3000", "-H", "0.0.0.0", "--webpack"]
+# Start the application — use next start (production) since we built above
+# Falls back to next dev if build failed
+CMD npx next start -p 3000 -H 0.0.0.0 2>/dev/null || npx next dev -p 3000 -H 0.0.0.0 --webpack
