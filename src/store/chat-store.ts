@@ -350,26 +350,31 @@ export const useChatStore = create<ChatState>()(
       },
 
       updateMessage: (conversationId: string, messageId: string, content: string) => {
-        set((state) => ({
-          conversations: state.conversations.map((conv) =>
-            conv.id === conversationId
-              ? {
-                  ...conv,
-                  messages: conv.messages.map((msg) => {
-                    if (msg.id !== messageId) return msg;
-                    // Defensive: preserve all existing fields, only update content and updatedAt
-                    // Never clear or lose other message properties
-                    return {
-                      ...msg,
-                      content: content ?? msg.content, // Don't allow content to be set to undefined
-                      updatedAt: new Date().toISOString(),
-                    };
-                  }),
-                  updatedAt: new Date().toISOString(),
-                }
-              : conv
-          ),
-        }));
+        // V.18: Fast streaming update — avoid full conversations.map for every chunk
+        // Instead, find the conversation + message by index and mutate in place.
+        // This prevents React from batching all chunks into a single render.
+        set((state) => {
+          const convIdx = state.conversations.findIndex((c) => c.id === conversationId);
+          if (convIdx === -1) return state;
+          const conv = state.conversations[convIdx];
+          const msgIdx = conv.messages.findIndex((m) => m.id === messageId);
+          if (msgIdx === -1) return state;
+
+          // Create new arrays only for the affected conversation (shallow copy others)
+          const newConversations = state.conversations.slice();
+          const newMessages = conv.messages.slice();
+          newMessages[msgIdx] = {
+            ...newMessages[msgIdx],
+            content: content ?? newMessages[msgIdx].content,
+            updatedAt: new Date().toISOString(),
+          };
+          newConversations[convIdx] = {
+            ...conv,
+            messages: newMessages,
+            updatedAt: new Date().toISOString(),
+          };
+          return { conversations: newConversations };
+        });
       },
 
       // ─── Update message search results (from auto web search) ────────

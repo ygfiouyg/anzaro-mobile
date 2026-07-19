@@ -17,11 +17,12 @@ export interface ChatMessage {
 
 export async function complete(
   messages: ChatMessage[],
-  opts: { temperature?: number; maxTokens?: number } = {}
+  opts: { temperature?: number; maxTokens?: number; model?: string } = {}
 ): Promise<string> {
   try {
     const zai = await getZAI()
     const completion = await zai.chat.completions.create({
+      model: opts.model || 'glm-4-flash',
       messages: messages as any,
       thinking: { type: 'disabled' },
       temperature: opts.temperature ?? 0.7,
