@@ -499,10 +499,13 @@ export function AudioPlayer({ widget, onMediaEnd }: AudioPlayerProps) {
   }, []);
 
   const handleError = useCallback((e: any) => {
-    console.error('[AudioPlayer] react-player error:', e);
+    // Log the stream URL so we can debug "البث غير متاح" errors. Most often
+    // the cause is a broken/404 stream URL — we've fixed the DB seed URLs
+    // (qurango typos, dead nogoumfm.net, etc.) so this should be rare now.
+    console.error('[AudioPlayer] react-player error:', e, 'url=', widget.streamUrl);
     setStreamError(true);
     setIsPlaying(false);
-  }, []);
+  }, [widget.streamUrl]);
 
   const handlePlay = useCallback(() => setIsPlaying(true), []);
   const handlePause = useCallback(() => setIsPlaying(false), []);
@@ -796,13 +799,27 @@ export function AudioPlayer({ widget, onMediaEnd }: AudioPlayerProps) {
           <AlertTriangle className="size-4 text-red-400 flex-shrink-0" />
           <span className="text-xs text-red-400">⚠️ البث غير متاح حالياً</span>
         </div>
-        <button
-          onClick={handleRetry}
-          className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
-        >
-          <RotateCcw className="size-4" />
-          إعادة المحاولة
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRetry}
+            className="flex items-center justify-center gap-2 flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
+          >
+            <RotateCcw className="size-4" />
+            إعادة المحاولة
+          </button>
+          {widget.streamUrl && (
+            <a
+              href={widget.streamUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
+              title="فتح البث في تبويب جديد للتحقق منه خارج التطبيق"
+            >
+              <ExternalLink className="size-4" />
+              فتح في تبويب
+            </a>
+          )}
+        </div>
       </div>
     );
   }

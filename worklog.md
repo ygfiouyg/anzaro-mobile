@@ -1763,3 +1763,335 @@ Stage Summary:
 - كل الـ features متاحة: onboarding، chat، media player، personality injection
 
 *Last updated: 2025-01-30 (Round 27) · HF Space live — https://kopabdo-delta-ai-v2.hf.space*
+
+---
+Task ID: imagevideo-fix-1
+Agent: general-purpose sub-agent
+Task: إصلاح توليد الصور والفيديو في Anzaro AI (BigModel / ZhipuAI)
+
+Work Log:
+- قريت worklog.md وكل الملفات المتعلقة (stream route, image/video routes, media-intent-llm, hf-video.service, zai-client)
+- اكتشفت السبب الجذري لمشكلة "اعملي فيديو بيرجع فيديو يوتيوب عشوائي":
+  * في `src/lib/ai-tools/media-intent-llm.ts`، الـ regex `hasVideoSignal` كان بيمسك أي كلمة "فيديو"
+    ويرجّع `{ source: 'youtube' }` — ده كان بيخلي "اعملي فيديو عن القطط" يروح لـ YouTube search
+    بدل ما يولّد فيديو جديد. الـ play-media route كان بيشتغل BEFORE الـ inline media gen pipeline.
+- اكتشفت إن `getZAIClient` مش مستورج في `src/app/api/chat/stream/route.ts` رغم إنه بيتستخدم 3 مرات
+  (لترجمة prompts العربية) — ده كان بيسبب ReferenceError عند runtime.
+- لقيت إن `/api/ai/image/route.ts` بيستخدم `ZHIPU_PLATFORM_KEY` بدل `ZAI_API_KEY` (التوافق ناقص).
+- لقيت إن `/api/ai/video/route.ts` بيدعم HuggingFace فقط — مفيش BigModel CogVideoX-Flash.
+- لقيت إن `/api/ai/video-gen/route.ts` بيستخدم `cogvideox-2` (مش مجاني) بدل `cogvideox-flash` (مجاني).
+
+### Changes Made:
+
+**1. `.env`** — Added `ZAI_API_KEY=` placeholder with documentation about what uses it.
+
+**2. `src/lib/ai-tools/media-intent-llm.ts`** — Added GENERATION intent guard at the top of `detectMediaIntent()`:
+   - Detects generation verbs (اعمل/اعملي/ولد/طلع/جيب/صور/صوّر/ارسم/generate/make/create/draw) + media keywords (صورة/فيديو/رسم/image/video).
+   - Returns `{ wantsMedia: false }` so the message falls through to the inline media generation pipeline.
+   - This fixes "اعملي فيديو" / "اعملي صورة" / "ارسم قطة" → now correctly triggers real generation, NOT YouTube search.
+   - "شغل فيديو" / "شغللي راديو" / "سمعلي أغنية" still work as before (play verbs are not affected).
+
+**3. `src/app/api/chat/stream/route.ts`** — Two fixes:
+   - **Import fix**: Added `getZAIClient` to the import from `@/lib/chat-utils` (was used 3 times but never imported → ReferenceError at runtime).
+   - **Video generation rewrite** (lines 1487-1611): Now tries BigModel CogVideoX-Flash FIRST (free, async with 2-min polling), then falls back to HuggingFace Gradio Spaces. Previously went straight to HF (which is unreliable/slow).
+   - **Image generation guard** (lines 1418-1464): Added early-exit when `ZAI_API_KEY` is empty (avoids wasted 401 calls). Also handles both `url` and `b64_json` response formats from CogView.
+
+**4. `src/app/api/ai/image/route.ts`** — Updated `generateWithZhipuAPI()`:
+   - Now reads `process.env.ZAI_API_KEY || process.env.ZHIPU_PLATFORM_KEY` (was ZHIPU_PLATFORM_KEY only).
+   - Updated error message to mention `ZAI_API_KEY`.
+
+**5. `src/app/api/ai/video/route.ts`** — Added BigModel CogVideoX-Flash handler (lines 237-362):
+   - Runs BEFORE the HuggingFace fallback loop, but ONLY when:
+     - No `image_url` provided (BigModel T2V only — I2V unreliable)
+     - User didn't explicitly select an HF model OR selected the default
+   - Submits async task → polls `/async-result/{task_id}` for up to 2 min → returns video URL.
+   - Saves asset to DB with `provider: 'bigmodel'`.
+   - Falls through to HF on any failure (content filter, timeout, network error).
+
+**6. `src/app/api/ai/video-gen/route.ts`** — Updated:
+   - Default model changed from `cogvideox-2` (paid) → `cogvideox-flash` (FREE).
+   - Removed unused `size` and `fps` params (BigModel doesn't use them).
+   - Added explicit `ZAI_API_KEY` validation with helpful error message.
+   - Extracted `ZAI_BASE` constant for reuse in GET handler.
+
+**7. `test-bigmodel.sh`** (new) — Bash smoke test for the BigModel API:
+   - Tests image generation (cogview-3-flash)
+   - Tests video submit + poll (cogvideox-flash) up to 2 min
+   - Usage: `ZAI_API_KEY=your_key bash test-bigmodel.sh`
+
+### Verification:
+- ✅ TypeScript typecheck: no NEW errors introduced by my changes (pre-existing errors unrelated).
+- ✅ The 3 `Cannot find name 'getZAIClient'` errors at lines 1400, 1493, 1927 are now FIXED (added import).
+- ✅ Bash script syntax validated.
+- ⚠️ Runtime testing requires `ZAI_API_KEY` to be set in `.env` (currently empty placeholder).
+
+### Next Actions (for the user):
+1. Get a free BigModel API key: https://open.bigmodel.cn/usercenter/apikeys
+2. Edit `/home/z/my-project/.env` and paste your key after `ZAI_API_KEY=`
+3. Restart the dev server: `npm run dev` (or `npm start`)
+4. Test image gen: chat "اعملي صورة قطة برتقالية قاعدة على النافذة"
+5. Test video gen: chat "اعملي فيديو أمواج البحر عند الغروب"
+6. Test YouTube still works: chat "شغل فيديو أغنية محمد منير"
+7. Optional: run `bash test-bigmodel.sh` to verify the API key works directly.
+
+### Architecture Summary (after fix):
+```
+"اعملي صورة قطة"   → detectMediaIntent returns {wantsMedia:false}  → falls through
+                   → detectInlineMediaGenIntent returns {type:'image'}
+                   → stream route calls BigModel cogview-3-flash (ZAI_API_KEY)
+                   → fallback: Pollinations FLUX
+                   → SSE: generatedImage event
+
+"اعملي فيديو بحر"  → detectMediaIntent returns {wantsMedia:false}  → falls through
+                   → detectInlineMediaGenIntent returns {type:'video'}
+                   → stream route: BigModel cogvideox-flash submit + poll (2 min)
+                   → fallback: HuggingFace cogvideox-2b / ltx-video-distilled
+                   → SSE: generatedVideo event
+
+"شغل فيديو منير"   → detectMediaIntent returns {wantsMedia:true, source:'youtube'}
+                   → play-media API → YouTube scrape → mediaWidget SSE event
+                   (NO generation — correct, user wants to play existing video)
+```
+
+*Last updated: 2025-01-30 · imagevideo-fix-1 · BigModel image+video generation fixed*
+
+---
+Task ID: contacts-fix-1
+Agent: sub-agent (Senior Full-Stack Developer)
+Task: Fix Google Contacts tool calling — AI outputs raw JSON instead of calling the tool
+
+Work Log:
+- قرأت worklog وinvestigated الـ files المطلوبة
+- اكتشفت ROOT CAUSE حرج: الـ pre-scan layer كله (اللي بيكشف "هاتلي رقم" وينفّذ google_contacts_reader)
+  كان مدفون جوه `streamFromZhipuAI()` — اللي مش بيتندى أبداً (DEAD CODE).
+  كل call sites بتاعتها اتعملها replace بـ `/* ZAI removed */` أو `/* no ZAI fallback */`.
+  فالـ pre-scan عمره ما كان بيشتغل لأي provider، والـ LLM بيشوف system prompt بيقول
+  "استخدم google_contacts_reader" فيطبع JSON-as-text: `{"tool":"google_contacts_reader",...}`
+- كمان اكتشفت إن `runChatWithTools` (LLM-driven tool calling) برضه dead code — مش بيتندى.
+
+الإصلاحات اللي اتعملت:
+
+### 1. src/app/api/chat/stream/route.ts (lines 1799-1955 — NEW)
+أضفت **TOP-LEVEL PRE-SCAN LAYER** على أعلى مستوى في الـ streaming try block،
+قبل أي provider routing. ده بيشتغل لكل الـ providers:
+- ZAI / Pollinations / Cerebras / HF / Groq / Gemini / OpenRouter / Anthropic / GitHub / OVH
+- بيكشف أنماط: "هاتلي رقم X" / "هات لي رقم X" / "جيبلي رقم X" / "دورلي على رقم X"
+  / "عايز رقم X" / "عاوز رقم X" / "ابحث عن رقم X" / "ادّيني رقم X" / "جب لي رقم X"
+- بيستخرج الاسم بـ regex شامل (متحقق بـ Node.js test — كل الأنماط بتطلع صح)
+- بينفّذ `google_contacts_reader` عبر `executeTool` + `runWithContext(request, ...)` 
+  (لازم runWithContext عشان google-auth.ts يقرا الـ NextAuth session cookie)
+- لو Google مش متصل → بيرجّع: "📞 Google Contacts مش متصل. اربط حسابك من الإعدادات..."
+- لو success → بيـ format الرد:
+  - LLM formatting أول (glm-4-flash عبر getZAIClient) لو متاح
+  - Template fallback لو ZAI مش متاح (مثلاً لو مفيش ZAI_API_KEY)
+- بيقفل الـ stream صح: `streamClosed = true` + `controller.enqueue([DONE])` + `controller.close()` + `return`
+- بيتخطى لو فيه image attachments أو file generation intent (مش نديره مع vision/PDF)
+- جواه try/catch مستقل — لو فشل بأي سبب، بيكمّل للـ provider routing العادي
+
+### 2. src/lib/chat/system-prompt-builder.ts (lines 148-159)
+غيّرت الـ "TRUSTED DATA OVERRIDE" block اللي كان بيقول:
+  "استخدم أداة google_contacts_reader فوراً" → ده كان السبب إن الـ LLM بيطبع JSON!
+الجديد بيقول:
+  "النظام بيـ execute الأداة في الـ backend تلقائياً. ⛔ ممنوع تكتب JSON أو tool calls كنص.
+   لو النتيجة وصلتك → صيغها. لو لسه مش وصلتك → قول 'ثواني هجيبهولك...'"
+
+### 3. src/lib/chat/capabilities-prompt.ts (lines 245-255)
+نفس التعديل — شيلت mention اسم الأداة `google_contacts_reader` من الـ prompt
+وحطيت تعليمات صريحة: "ممنوع تكتب {tool:...} — النظام مش بيـ parse الـ JSON اللي بتكتبه".
+
+### 4. تأكد إن `getZAIClient` مستورد (line 33)
+كان مستورد أصلاً من `@/lib/chat-utils` — تأكدت منه.
+
+### Verification:
+- TypeScript check: 0 errors جديدة في الكود اللي اتعمله (lines 1799-1955)
+  (pre-existing errors في dead code بتاع streamFromZhipuAI لسه موجودة بس مش بتأثر)
+- Regex test بـ Node.js: كل الأنماط السبعة ("هاتلي رقم"، "هات لي رقم"، "جيبلي رقم"،
+  "دورلي على رقم"، "عايز رقم"، "عاوز رقم"، "ابحث عن رقم") بتـ trigger بنجاح
+  واستخراج الاسم صح. الأسئلة ("ايه رقم كذا؟") والـ file gen ("اعمل ملف pdf") بتتخطى.
+
+### Test Commands:
+```bash
+# 1. TypeScript check (باستثناء pre-existing errors في dead code)
+cd /home/z/my-project && npx tsc --noEmit 2>&1 | grep "route.ts" | grep -v "streamFromZhipuAI\|2316\|2392\|2393\|2400\|2405\|424\|3137"
+
+# 2. Regex test (سريع)
+cd /home/z/my-project && node -e "
+const t='هاتلي رقم محمد حامد';
+const AV=/(?:هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دورلي|دور\s*لي|ابحث|عايز|عاوز)/i;
+const CK=/(?:رقم|هاتف|اتصال|contacts?|phone|موبايل|موبيل|تليفون)/i;
+console.log('trigger:', AV.test(t)&&CK.test(t));
+console.log('name:', t.replace(/.*(?:هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دور\s*على\s*رقم|دورلي\s*على\s*رقم|ابحث\s*عن\s*رقم|عايز\s*رقم|عاوز\s*رقم|رقم)\s*/i,'').trim());
+"
+
+# 3. Build test
+cd /home/z/my-project && npm run build 2>&1 | tail -20
+
+# 4. Runtime test (بعد deploy)
+# - قول "هاتلي رقم [اسم جهة اتصال موجودة]"
+# - المفروض يرجّع: "📞 [الاسم]: [الرقم]" (مش JSON)
+# - لو Google مش متصل: "📞 Google Contacts مش متصل. اربط حسابك من الإعدادات..."
+# - قول "هاتلي pdf" → المفروض يكمل لـ file generation (مش يـ trigger contacts)
+```
+
+### ملاحظات:
+- الـ dead code بتاع `streamFromZhipuAI` (بما فيه الـ pre-scan القديم والـ tool-calling layer)
+  لسه موجود بس مش بيتندى. ممكن يتشال في cleanup لاحق.
+- الـ pre-scan الجديد بيتخطى tool types تانية (calendar/tasks/drive) لأن المهمة
+  كانت focused على contacts. لو محتاج fixهم بنفس الطريقة، الـ pattern جاهز للنسخ.
+- الـ `getZAIClient()` المستخدم في الـ formatting بيستخدم ZAI_API_KEY من env.
+  لو مش متاح، بيـ fall back لـ template-based formatting (مش بيفشل).
+
+Stage Summary:
+- ✅ ROOT CAUSE اتعرف: الـ pre-scan كله كان dead code جوه streamFromZhipuAI()
+- ✅ Top-level pre-scan اتضاف بيشتغل لكل providers
+- ✅ System prompt اتصلح: مابقاش يقول للـ LLM "استخدم الأداة" (اللي كان بيسبب JSON output)
+- ✅ "Not connected" case بيُتعامل معاه برسالة واضحة بالعربي
+- ✅ Template fallback لو ZAI مش متاح
+- ✅ ماكاينش errors TypeScript جديدة
+
+*Last updated: 2025-01-30 (contacts-fix-1) · Google Contacts tool calling fixed*
+
+---
+Task ID: radio-fix-1
+Agent: sub-agent (general-purpose)
+Task: Fix radio station search + stream unavailable error
+
+Work Log:
+
+## Root Cause Analysis
+
+### Problem 1: "البث غير متاح" (stream unavailable) — ROOT CAUSE FOUND
+**Verified via curl**: The DB seed files (`src/lib/anzaro-seed.ts`, `prisma/seed.ts`, `seed.js`) and the `FALLBACK_RADIO_STATIONS` in `src/lib/radio-stations.ts` all contained **broken stream URLs** that returned HTTP 404:
+
+| URL | Status | Issue |
+|---|---|---|
+| `https://qurango.net/radio/taratee` | 404 | Typo — should be `tarateel` (with `l`) |
+| `https://qurango.net/radio/afasy` | 404 | Wrong slug — should be `mishary_alafasi` |
+| `https://nogoumfm.net/stream` | 404 | Domain doesn't host the stream |
+| `https://streaming.radionz.net/radiomasr` | DNS failure | Domain doesn't resolve |
+| `https://stream.radiojar.com/quran-mp3` (×5) | 404 | radiojar mountpoint doesn't exist |
+| `https://stream.radiojar.com/quran` (×5) | 404 | radiojar mountpoint doesn't exist |
+| `https://carina.streamerr.co:2020/stream/OnSportFM` | 503 | Stream offline |
+
+When the Smart Ball detector picked `stations[0]` (the first Quran station by sortOrder), it got `taratee` → 404 → ReactPlayer's `<audio>` element fired `onError` → UI showed "البث غير متاح". The stream URL "works when tested directly" because the user was testing `tarateel` (the correct URL), not `taratee` (the broken seeded URL).
+
+### Problem 2: Search doesn't find requested stations
+The Smart Ball detector's `media_play` handler only matched 4 hardcoded regex patterns (`قرآن/نجوم/موسيقى/أناشيد`). For anything else (e.g. "شغل إذاعة القاهرة", "شغل راديو الشرق", "شغل العفاسي"), it fell through to `stations[0]` — silently playing the wrong station. It also never consulted the `BUILTIN_STATIONS` list in `play-media/route.ts` (the two lists were disconnected).
+
+The `matchStation()` function in `play-media/route.ts` had a related bug: when no station matched (score=-1), it still returned `BUILTIN_STATIONS[0]` (the default initializer) — silently defaulting to the first Quran station for unrelated queries.
+
+## Fixes Applied
+
+### 1. `src/lib/radio-stations.ts` — REWRITTEN (single source of truth)
+- Extracted `BUILTIN_STATIONS` to this shared module (was duplicated inline in `play-media/route.ts`)
+- Added **20 verified working stations** across 4 categories:
+  - **Quran (12)**: tarateel (main), Cairo ERTU (radiojar `8s5u5tpdtwzuv`), 9 reciters (العجمي، العفاسي، المعيقلي، الغامدي، الدوسري، عبدالباسط، الأخضر، أبكر، الشاطري), mix, fatwa
+  - **Music (6)**: Nogoum FM (zeno.fm), Radio Hits 88.2 Cairo, Radio 9090, Arab Mix FM, Elissa FM, Amr Diab Radio
+  - **News (1)**: Radio Asharq with Bloomberg
+  - Sports entry commented out (On Sport FM returns 503 — no working Arabic sports stream found)
+- Exported `normalizeArabic()`, `matchStation()` (returns `null` when no match ≥ minScore), `getDefaultStationForCategory()`
+- `FALLBACK_RADIO_STATIONS` and `SEED_RADIO_STATIONS` are now derived from `BUILTIN_STATIONS` (one source of truth)
+
+### 2. `src/app/api/ai/play-media/route.ts`
+- Replaced inline `BUILTIN_STATIONS` + `matchStation` + `normalizeArabic` with imports from `@/lib/radio-stations`
+- `matchStation()` now returns `Station | null` (was always `Station`)
+- `handleRadio()` rewritten:
+  - Broad DB fetch (`take: 50`) + JS-side scoring with `normalizeArabic` (was `contains: query` which is exact-substring + non-normalized)
+  - Requires minimum score (15) to accept a DB match — prevents silent `stations[0]` fallback
+  - Falls through to `BUILTIN_STATIONS` matcher when no DB match
+  - Category-based default fallback ("شغل قرآن" → main Quran stream, "شغل أخبار" → Asharq)
+  - Returns helpful "not found" message with examples when truly no match (instead of HTTP error)
+
+### 3. `src/lib/anzaro-smart-ball-detector.ts`
+- Imports `matchStation`, `getDefaultStationForCategory`, `normalizeArabic` from shared module
+- Expanded `media_play` regex: now matches `محطة/محطه/station/إليسا/دياب/هيتس/9090/أخبار/اخبار/news/رياضة/رياضه/sport` in addition to original patterns
+- Replaced crude `/قرآن|نجوم|موسيقى|أناشيد/` switch with proper 5-step matching:
+  1. DB stations scored with `normalizeArabic` (min score 15)
+  2. `BUILTIN_STATIONS` via shared `matchStation()` (min score 15)
+  3. Generic category fallback (قرآن/أخبار/موسيقى/رياضة)
+  4. If still no match → emit helpful "not found" message and return (no silent default)
+- Now correctly plays specific stations like "شغل العفاسي" / "شغل نجوم FM" / "شغل راديو الشرق"
+
+### 4. `src/components/chat/NowPlayingBar.tsx`
+- Added `ExternalLink` import + "open externally" button on error state (so user can verify the stream URL works outside the app)
+- Added `onStalled` handler that logs but doesn't trigger error state (live radio streams stall briefly during network blips — that's normal, not an error)
+- `onError` now logs the `sourceUrl` for easier debugging
+
+### 5. `src/components/chat/AudioPlayer.tsx`
+- Error state now shows two buttons side-by-side: "إعادة المحاولة" (retry) + "فتح في تبويب" (open stream URL in new tab)
+- `handleError` callback now logs `widget.streamUrl` for debugging
+
+### 6. Seed files — ALL BROKEN URLs REPLACED
+- `src/lib/anzaro-seed.ts`: 5 broken stations → 9 verified working stations (Quran + music + news)
+- `prisma/seed.ts`: 5 broken radiojar URLs → 8 verified working stations
+- `seed.js`: 5 broken radiojar URLs → 8 verified working stations (Docker standalone seed)
+
+## Verification
+
+### Lint
+- `bun run lint` → 16 problems (1 error in `src/lib/db.ts`, 15 warnings) — **same count as before**, no new issues from these changes
+
+### TypeScript
+- `bunx tsc --noEmit` → 0 errors in any modified file (all 22 pre-existing errors are in unrelated files: `models.ts`, `oauth`, `openai`, `chat-store.ts`)
+
+### Runtime curl tests (dev server on :3000)
+All passed:
+- ✅ `POST /api/ai/play-media {"query":"شغل قرآن"}` → `إذاعة القرآن الكريم` (tarateel) — score-based default
+- ✅ `POST /api/ai/play-media {"query":"شغل قرآن العجمي"}` → `إذاعة أحمد العجمي` (score=40)
+- ✅ `POST /api/ai/play-media {"query":"شغل نجوم FM"}` → `نجوم FM` (score=55, zeno.fm URL)
+- ✅ `POST /api/ai/play-media {"query":"شغل راديو الشرق"}` → `راديو الشرق مع بلومبرج` (score=40)
+- ✅ `POST /api/ai/play-media {"query":"شغل قرآن المعيقلي"}` → `إذاعة ماهر المعيقلي` (score=41)
+- ✅ `POST /api/ai/play-media {"query":"شغل العفاسي"}` → `إذاعة مشاري العفاسي` (score=40)
+- ✅ `POST /api/ai/play-media {"query":"شغل القاهرة"}` → `إذاعة القرآن الكريم من القاهرة` (ERTU radiojar)
+- ✅ `POST /api/ai/play-media {"query":"شغل أخبار"}` → Asharq (news category fallback)
+- ✅ `POST /api/ai/play-media {"query":"شغل موسيقى"}` → Nogoum FM (music category fallback)
+- ✅ `POST /api/ai/play-media {"query":"شغل محطة ناسا"}` → "مقدرش ألاقي محطة..." with examples list (instead of silent default)
+
+### Stream URL verification (curl -sIL)
+All 20 BUILTIN_STATIONS URLs return `200 audio/mpeg` or `200 audio/aacp`:
+- `qurango.net/radio/tarateel` ✅
+- `stream.radiojar.com/8s5u5tpdtwzuv` ✅ (official ERTU Cairo Quran)
+- `qurango.net/radio/{mishary_alafasi,ahmad_alajmy,maher_almuaiqly,...}` ✅ (×9 reciters)
+- `stream.zeno.fm/qb1zvsykm98uv` ✅ (Nogoum FM — 302 redirect to surfernetwork JWT, browser follows)
+- `radiohits882.radioca.st/;` ✅
+- `9090streaming.mobtada.com/9090FMEGYPT` ✅
+- `l3.itworkscdn.net/asharqradioalive/asharqradioa/icecast.audio` ✅ (audio/aacp)
+
+## Files Modified (8)
+1. `src/lib/radio-stations.ts` — rewritten (shared BUILTIN_STATIONS + matchStation)
+2. `src/app/api/ai/play-media/route.ts` — use shared module, fix null return
+3. `src/lib/anzaro-smart-ball-detector.ts` — 5-step matching, expanded regex
+4. `src/components/chat/NowPlayingBar.tsx` — error UI + onStalled handler
+5. `src/components/chat/AudioPlayer.tsx` — error UI + URL logging
+6. `src/lib/anzaro-seed.ts` — replace 5 broken URLs with 9 verified
+7. `prisma/seed.ts` — replace 5 broken URLs with 8 verified
+8. `seed.js` — replace 5 broken URLs with 8 verified
+
+## Test Commands
+```bash
+# Lint (should show 16 problems — same as before, no new issues)
+bun run lint
+
+# TypeScript check (0 errors in modified files)
+bunx tsc --noEmit 2>&1 | grep -E "radio-stations|play-media/route|smart-ball-detector|NowPlayingBar|AudioPlayer|anzaro-seed"
+
+# Start dev server
+bun run dev
+
+# Test play-media API
+curl -s -X POST http://localhost:3000/api/ai/play-media \
+  -H "Content-Type: application/json" \
+  -d '{"query":"شغل قرآن العجمي","source":"radio"}'
+
+# Verify stream URL works
+curl -sIL -o /dev/null -w "%{http_code} %{content_type}\n" \
+  "https://qurango.net/radio/tarateel"
+```
+
+Stage Summary:
+- **Stream unavailable fixed**: Root cause was 5+ broken URLs in DB seed files (typos like `taratee` instead of `tarateel`, dead domains like `nogoumfm.net/stream`, non-existent radiojar mountpoints). All replaced with verified working URLs.
+- **Station search fixed**: Smart Ball detector now uses shared `BUILTIN_STATIONS` matcher (20 stations across 4 categories) instead of crude 4-pattern regex. Returns helpful "not found" message instead of silently defaulting to first station.
+- **Single source of truth**: `BUILTIN_STATIONS` in `src/lib/radio-stations.ts` is now the canonical list — used by play-media API, Smart Ball detector, and `/api/radio/stations` fallback. Adding a station in one place propagates everywhere.
+- **Better error UX**: Both `NowPlayingBar` and `AudioPlayer` now show "open in new tab" button on stream error so user can verify the URL externally.
+
+*Last updated: 2025-01-30 (radio-fix-1) · Radio station search + stream URLs fixed*

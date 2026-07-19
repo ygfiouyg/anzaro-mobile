@@ -3,6 +3,11 @@ import { executeIntent } from '@/lib/anzaro-control-engine'
 import { resolveDeviceByAlias, executeDeviceAction, executeSceneByName, startMediaSession, controlMediaSession } from '@/lib/anzaro-control-engine'
 import { complete, buildPersonalitySystemPrompt } from '@/lib/anzaro-llm'
 import type { PersonalityTraits } from '@/lib/anzaro-types'
+import {
+  matchStation,
+  getDefaultStationForCategory,
+  normalizeArabic,
+} from '@/lib/radio-stations'
 
 export interface SmartBallCommand {
   type: 'media_play' | 'media_stop' | 'media_pause' | 'media_resume' | 'device_on' | 'device_off' | 'scene'
@@ -92,70 +97,134 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
   }
 
   // ── Media: PLAY ──
+  // Expanded to match any radio station name (not just قرآن/نجوم).
+  // The matcher now searches BOTH DB stations and the shared BUILTIN_STATIONS
+  // list (qurango reciters, Nogoum FM, Radio Hits Cairo, Asharq news, etc.).
+  // If the user said "شغل قرآن" (generic), we default to the main Quran stream.
+  // If the user said "شغل محطة كذا" with a name we don't recognize, we DON'T
+  // match here — we return null so the request falls through to the LLM-based
+  // media-intent detector, which has more flexibility (and can call the
+  // /api/ai/play-media endpoint with a proper search).
   if (/(?:شغّل|شغل|play|ابدأ|ابدأ|تشغيل)/i.test(lower) &&
-      /(?:قرآن|قران|راديو|radio|music|موسيقى|أناشيد|أنشودة|nasheed|quran|نجوم|إذاعة)/i.test(lower)) {
+      /(?:قرآن|قران|راديو|radio|music|موسيقى|أناشيد|أنشودة|nasheed|quran|نجوم|إذاعة|اذاعة|محطة|محطه|station|إليسا|دياب|هيتس|9090|أخبار|اخبار|news|رياضة|رياضه|sport)/i.test(lower)) {
     return {
       type: 'media_play',
       execute: async (sink) => {
-        // Search stations by query
-        const stations = await db.radioStation.findMany({ where: { isActive: true } })
-        let match = null
-        if (/قرآن|قران|quran/i.test(lower)) {
-          match = stations.find((s) => /quran|قرآن|قران/i.test(s.name) || s.category === 'quran')
-        } else if (/نجوم|nogoum/i.test(lower)) {
-          match = stations.find((s) => /nogoum|نجوم/i.test(s.name))
-        } else if (/موسيقى|music/i.test(lower)) {
-          match = stations.find((s) => s.category === 'music')
-        } else if (/أناشيد|أنشودة|nasheed/i.test(lower)) {
-          match = stations.find((s) => s.category === 'islamic' || /nasheed|أناشيد/i.test(s.name))
-        }
-        // Default to first quran station if "play quran"
-        if (!match && /قرآن|قران|quran/i.test(lower)) {
-          match = stations.find((s) => s.category === 'quran') || stations[0]
-        }
-        if (!match && stations.length > 0) {
-          match = stations[0]
+        // ── Step 1: Try DB stations (admin-managed) ──
+        let dbStations: any[] = []
+        try {
+          dbStations = await db.radioStation.findMany({ where: { isActive: true } })
+        } catch { /* DB not ready */ }
+
+        // ── Step 2: Search DB stations with the shared matcher ──
+        // We pass the FULL message (not just lowercased) so Arabic normalization works.
+        let match: { name: string; streamUrl: string; category?: string; id?: string } | null = null
+
+        if (dbStations.length > 0) {
+          // Inline search against DB rows using the shared normalizeArabic.
+          const normQ = normalizeArabic(message)
+          const qTokens = normQ.split(' ').filter((t) => t.length > 1)
+          const GENERIC = new Set([
+            'شغل', 'شغلى', 'شغلي', 'استمع', 'اسمع', 'افتح', 'افتحلي', 'play',
+            'قرآن', 'قران', 'quran', 'القرآن', 'القران', 'الكريم', 'من', 'ال',
+            'محطة', 'محطه', 'station', 'radio', 'راديو', 'إذاعة', 'اذاعة', 'اذاعه',
+            'fm', 'اف ام', 'لي', 'بقا', 'عشان', 'لو', 'سريع',
+          ])
+          let bestDb: any = null
+          let bestDbScore = 0
+          for (const s of dbStations) {
+            const normName = normalizeArabic(s.name || '')
+            let score = 0
+            for (const t of qTokens) {
+              if (GENERIC.has(t)) continue
+              if (normName.includes(t)) score += 20
+            }
+            if (normQ === normName) score += 100
+            else if (normName && (normName.includes(normQ) || normQ.includes(normName))) score += 25
+            if (score > bestDbScore) { bestDbScore = score; bestDb = s }
+          }
+          if (bestDb && bestDbScore >= 15) {
+            match = { name: bestDb.name, streamUrl: bestDb.streamUrl, category: bestDb.category, id: bestDb.id }
+            console.log(`[smart-ball] DB station match: "${bestDb.name}" (score=${bestDbScore})`)
+          }
         }
 
-        if (match) {
-          // Need a userId — find any user with an active session, or use the first user
-          const anyUser = await db.user.findFirst({ orderBy: { createdAt: 'asc' } })
-          if (anyUser) {
-            // Stream progressively for a more natural feel
-            sink('▶ ')
-            await new Promise((r) => setTimeout(r, 100))
-            sink(`**تم تشغيل ${match.name}**\n\n`)
-            await new Promise((r) => setTimeout(r, 150))
-            sink('الراديو بيذيع دلوقتي. 🎵\n')
-            await new Promise((r) => setTimeout(r, 100))
-            sink(`قول "اقفل الراديو" عشان توقفه.`)
-            // Execute the actual media session start
-            await startMediaSession({
-              userId: anyUser.id,
-              title: match.name,
-              source: match.name,
-              streamUrl: match.streamUrl,
-              stationId: match.id,
-              type: 'radio',
-            })
-            // ── V.15: Send mediaWidget SSE event so the frontend opens the NowPlayingBar ──
-            // This is the critical payload that triggers the audio player UI + auto-play.
-            sink({
-              mediaWidget: {
-                type: 'audio',
-                source: 'radio',
-                title: match.name,
-                streamUrl: match.streamUrl,
-                mimeType: 'audio/mpeg',
-                autoPlay: true,
-              },
-            })
-          } else {
-            sink('مقدرش أشغّل — لازم تسجل دخول الأول.')
+        // ── Step 3: Fall back to BUILTIN_STATIONS via the shared matcher ──
+        if (!match) {
+          const builtinMatch = matchStation(message, /* minScore */ 15)
+          if (builtinMatch) {
+            match = builtinMatch
+            console.log(`[smart-ball] BUILTIN station match: "${builtinMatch.name}"`)
           }
-        } else {
-          sink('مقدرش ألاقي محطة مناسبة. 🎵')
         }
+
+        // ── Step 4: Generic category fallback ──
+        // "شغل قرآن" → main Quran stream. "شغل أخبار" → Asharq news.
+        if (!match) {
+          if (/قرآن|قران|quran/i.test(lower)) {
+            const def = getDefaultStationForCategory('quran')
+            match = def
+            console.log(`[smart-ball] generic Quran → default "${def.name}"`)
+          } else if (/أخبار|اخبار|news/i.test(lower)) {
+            match = getDefaultStationForCategory('news')
+          } else if (/موسيقى|موسيقي|music|أغاني|اغاني/i.test(lower)) {
+            match = getDefaultStationForCategory('music')
+          } else if (/رياضة|رياضه|sport|sports|كرة/i.test(lower)) {
+            match = getDefaultStationForCategory('sports')
+          }
+        }
+
+        // ── Step 5: If still no match, return null from execute() ──
+        // The caller (chat stream) will fall through to LLM-based detection
+        // which calls /api/ai/play-media (more search options).
+        if (!match) {
+          sink(`مقدرش ألاقي محطة تطابق "${message.trim()}". 🎵\n` +
+               `جرّب تكتب اسم المحطة بالعربي أو الإنجليزي، مثلاً:\n` +
+               `• "شغل إذاعة القرآن" — البث الرئيسي\n` +
+               `• "شغل قرآن العجمي" أو "العفاسي" أو "ماهر المعيقلي"\n` +
+               `• "شغل نجوم FM" أو "راديو هيتس"\n` +
+               `• "شغل راديو الشرق" — الأخبار`)
+          return
+        }
+
+        // Need a userId — find any user with an active session, or use the first user
+        const anyUser = await db.user.findFirst({ orderBy: { createdAt: 'asc' } })
+        if (!anyUser) {
+          sink('مقدرش أشغّل — لازم تسجل دخول الأول.')
+          return
+        }
+
+        // Stream progressively for a more natural feel
+        sink('▶ ')
+        await new Promise((r) => setTimeout(r, 100))
+        sink(`**تم تشغيل ${match.name}**\n\n`)
+        await new Promise((r) => setTimeout(r, 150))
+        sink('الراديو بيذيع دلوقتي. 🎵\n')
+        await new Promise((r) => setTimeout(r, 100))
+        sink(`قول "اقفل الراديو" عشان توقفه.`)
+
+        // Execute the actual media session start
+        await startMediaSession({
+          userId: anyUser.id,
+          title: match.name,
+          source: match.name,
+          streamUrl: match.streamUrl,
+          stationId: (match as any).id,
+          type: 'radio',
+        })
+
+        // ── V.15: Send mediaWidget SSE event so the frontend opens the NowPlayingBar ──
+        // This is the critical payload that triggers the audio player UI + auto-play.
+        sink({
+          mediaWidget: {
+            type: 'audio',
+            source: 'radio',
+            title: match.name,
+            streamUrl: match.streamUrl,
+            mimeType: 'audio/mpeg',
+            autoPlay: true,
+          },
+        })
       },
     }
   }

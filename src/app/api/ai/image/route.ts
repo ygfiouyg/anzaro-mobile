@@ -30,12 +30,15 @@ export const maxDuration = 420; // 7 minutes
 // If it fails → return error to user with the model name.
 // ═══════════════════════════════════════════════════════════════════
 
-// ZhipuAI Platform API key (only cogview-3-flash has remaining credits)
+// ZhipuAI / BigModel Platform API key
+// Uses ZAI_API_KEY (preferred) with ZHIPU_PLATFORM_KEY as legacy fallback.
+// The free cogview-3-flash model works with this key.
 // FIX M5: Lazy key validation — check at call time, not module scope
 const ZHIPU_API_BASE = 'https://open.bigmodel.cn/api/paas/v4';
 
 /**
- * Generate image using ZhipuAI Platform API directly.
+ * Generate image using ZhipuAI / BigModel Platform API directly.
+ * Endpoint: POST /images/generations  with model=cogview-3-flash (FREE)
  */
 async function generateWithZhipuAPI(
   prompt: string,
@@ -43,9 +46,11 @@ async function generateWithZhipuAPI(
   model: string
 ): Promise<{ base64: string }> {
   // FIX M5: Validate API key at call time with clear error
-  const ZHIPU_PLATFORM_KEY = process.env.ZHIPU_PLATFORM_KEY;
+  // Prefer ZAI_API_KEY (the canonical env var across the platform),
+  // fall back to ZHIPU_PLATFORM_KEY for legacy deployments.
+  const ZHIPU_PLATFORM_KEY = process.env.ZAI_API_KEY || process.env.ZHIPU_PLATFORM_KEY;
   if (!ZHIPU_PLATFORM_KEY) {
-    throw new Error('ZhipuAI API key not configured');
+    throw new Error('ZhipuAI API key not configured (set ZAI_API_KEY env var)');
   }
 
   const url = `${ZHIPU_API_BASE}/images/generations`;

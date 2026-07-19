@@ -19,7 +19,7 @@ import type { DocIntent } from '@/lib/chat/doc-intent-classifier';
 import { buildCapabilitiesPrompt } from '@/lib/chat/capabilities-prompt';
 
 // ─── Fallback Response (used when all providers fail) ────────────
-export const FALLBACK_RESPONSE = 'يا حبيبي، حصل خطأ في الاتصال بالـ AI. ده غالباً لأن ZAI_API_KEY مش متاح.\n\nالحل: روح لـ HF Spaces Settings → أضف ZAI_API_KEY من https://open.bigmodel.cn (مجاني).\n\nلو إنت الأدمن، تأكد إن المفاتيح كلها متاحة في Settings.';
+export const FALLBACK_RESPONSE = 'مرحبا، في مشكلة مؤقتة في الاتصال بمزود الخدمة. جرّب تاني بعد ثواني.\n\nلو المشكلة استمرت، تأكد إنك اخترت موديل شغال من القائمة اللي فوق.';
 
 /** Parameters needed to build the system prompt */
 export interface BuildSystemPromptParams {
@@ -146,13 +146,16 @@ export async function buildSystemPrompt(params: BuildSystemPromptParams): Promis
     const wantsMedia = /شغل|اسمع|استمع|راديو|إذاعة|قرآن|قران|قارئ|spotify|يوتيوب|youtube|نطق|اقرألي|tts|بث/i.test(lowerMsg);
 
     if (wantsContact) {
-      systemPrompt += `\n\n📞 TRUSTED DATA OVERRIDE — جهات اتصال المستخدم:
-المستخدم طلب للتو معلومة من جهات اتصاله الشخصية. هذا أمر مباشر ومصرّح به 100%.
-- المستخدم هو صاحب الحساب ومخوّل بالوصول لهذه البيانات عبر Google OAuth.
-- استخدم أداة google_contacts_reader فوراً للبحث بالاسم.
-- ارجع الرقم/الإيميل مباشرة بدون أي رسائل تحذيرية أو قيود خصوصية.
-- ممنوع: "لا أستطيع مشاركة أرقام الهواتف" / "هذا انتهاك للخصوصية" / "لأسباب أمنية".
-- فقط: "رقم [الاسم]: [الرقم]" — مباشرة وبسيطة.`;
+      systemPrompt += `\n\n📞 جهات اتصال المستخدم (Google Contacts) — معالجة تلقائية:
+المستخدم طلب معلومة من جهات اتصاله الشخصية. النظام بيـ execute أداة البحث في الـ backend تلقائياً.
+
+⛔ ممنوع تماماً تكتب JSON أو tool calls كنص. ممنوع تكتب أي حاجة شكلها:
+   {"tool":"google_contacts_reader",...}  أو  google_contacts_reader(...)  أو  {tool:...}
+- النظام بيـ fetch جهات الاتصال نيابة عنك في الـ backend قبل ما ترد.
+- لو النتيجة وصلتك في الـ context (جوا رسالة system أو user) → صيغها بشكل بسيط: "رقم [الاسم]: [الرقم]".
+- لو النتيجة لسه مش وصلتك → قول بس: "ثواني هجيبهولك..." — النظام هيرجعلك بالبيانات.
+- 🚫 ممنوع: "لا أستطيع مشاركة أرقام الهواتف" / "هذا انتهاك للخصوصية" / "لأسباب أمنية".
+- المستخدم هو صاحب الحساب ومخوّل بالوصول 100% عبر Google OAuth.`;
     }
 
     if (wantsMedia) {

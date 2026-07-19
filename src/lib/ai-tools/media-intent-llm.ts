@@ -92,6 +92,24 @@ export function detectMediaIntent(message: string): MediaIntent {
   const norm = normalizeArabic(message);
   const lower = message.toLowerCase();
 
+  // ── 0a) GENERATION intent: "اعملي صورة/فيديو", "ارسم", "ولد فيديو" ──
+  // These are NOT play/search intents — they should fall through to the
+  // inline media generation pipeline (detectInlineMediaGenIntent) which
+  // actually generates new images/videos via CogView/CogVideoX.
+  //
+  // Without this guard, "اعملي فيديو عن القطط" would match the "فيديو"
+  // keyword below and be routed to YouTube search, returning a random
+  // YouTube video instead of generating one.
+  //
+  // Generation verbs (Arabic): اعمل، اعملي، ولد، طلع، جيب، صور، صوّر، ارسم، ارسملي، حوّل
+  // Generation verbs (English): generate, make, create, draw
+  const hasGenerateVerb = /اعمل(?:ي|لي)?|ولد(?:لي|ي)?|طلع(?:لي|ي)?|جيب(?:لي|ي)?|صوّ?ر(?:لي|ي)?|ارسم(?:لي|ي)?|حوّل|generate|make|create|draw/i.test(message);
+  const hasMediaKeyword = /صور[ةه]|فيديو|فديو|video|image|picture|portrait|رسم|لوح/i.test(message);
+  if (hasGenerateVerb && hasMediaKeyword) {
+    // Let the inline media generation pipeline handle this.
+    return { wantsMedia: false };
+  }
+
   // ── 0) STOP intent: user wants to stop/close current media ──
   // Check this FIRST — "اقفل الراديو" should not be interpreted as "play radio"
   if (/اقفل|اقفله|اقفلي|قفل|وقف|وقفه|قفلي|سكته|اسكت|إيقاف|ايقاف|stop|pause|mute|كتم|صامت|close\s+(?:the\s+)?(?:radio|player|music)|shut\s*up/i.test(message)) {

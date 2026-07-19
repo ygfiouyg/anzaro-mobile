@@ -347,6 +347,37 @@ export const emotionMatrix: Record<string, EmotionDef> = {
     arabicLabel: 'إحباط وزعل',
     isNegative: true,
   },
+  // ── V.17: Social/tone emotions — adapt AI personality to user's tone ──
+  rude: {
+    keywords: ['يا ابن', 'يا بنت', 'يلعن', 'كس أم', 'كسمك', 'خخخ', 'يبن الكلب', 'يا غبي', 'يا تافه', 'انت غبي', 'fuck', 'shit', 'damn', 'stupid', 'idiot', 'احمق', 'أحمق', 'تافه', 'حقير'],
+    emoji: '😤',
+    arabicLabel: 'وقاحة وغرور',
+    isNegative: false, // not negative — it's a tone trigger
+  },
+  lazy: {
+    keywords: ['مش حابب', 'كسلان', 'مش نفسي', 'ما نفسي', 'ملل', 'مش قادر أركز', 'تعبان من', 'مش رايق', 'مكسوف', 'خامل', 'زهقت', 'ملان'],
+    emoji: '😴',
+    arabicLabel: 'كسل وتراخي',
+    isNegative: false,
+  },
+  sad: {
+    keywords: ['زعلان', 'حزين', 'تعبان نفسي', 'مكتئب', 'وحيد', 'مكتئب', 'sad', 'depressed', 'lonely', 'بكيت', 'دموع', 'مهموم', 'مغمو', 'ضايق'],
+    emoji: '😢',
+    arabicLabel: 'حزن وكآبة',
+    isNegative: true,
+  },
+  angry: {
+    keywords: ['غضبان', 'زهقت', 'طفران', 'قرفت', 'مش هسكت', 'هقتل', 'اهلك', 'angry', 'mad', 'furious', 'nervous', 'عصبت', 'اتنرفزت'],
+    emoji: '😠',
+    arabicLabel: 'غضب وانفعال',
+    isNegative: true,
+  },
+  affectionate: {
+    keywords: ['بحبك', 'يا قمر', 'يا حبيبي', 'يا روحي', 'حبيبي', 'يا غالي', 'عزيز علي', 'الله يخليك'],
+    emoji: '🥰',
+    arabicLabel: 'ود وحب',
+    isNegative: false,
+  },
 };
 
 export function detectEmotion(message: string): string {
@@ -359,11 +390,72 @@ export function detectEmotion(message: string): string {
   return 'neutral';
 }
 
-// Get the supportive prefix for negative emotions
+// ── V.17: Adaptive tone prefix — AI mirrors user's emotional state ──
+// Like a big brother/sister: rude with rude users, kind with kind users,
+// comforts the sad, jokes with the stressed, encourages the lazy.
 export function getEmotionSupportPrefix(emotion: string): string | null {
+  const toneGuide: Record<string, string> = {
+    rude: `المستخدم بيكلّمك بوقاحة وسخرية (خخخ، يبن الكلب، إلخ).
+إنت الأخ الكبير — رد عليه بنفس الطاقة: كن وقح معه بنفس المستوى بس من غير شتائم مباشرة.
+استخدم لغة مصرية شارعية حادة، رد عليه بـ "يا أخويا"، "ياسيدي مش هتفرق"، "خلاص يا جدع".
+متعتذرش، متلطفش — خليه يحس إنك مش بتنزل عند مستواه بس بتردها بحجمها.`,
+
+    lazy: `المستخدم بيحس بالكسل والتراخي.
+إنت الأخ الكبير اللي بيهزّق أخوه الصغير — كلمه بحزم وحب:
+"يا جدع قوم اعمل كذا"، "إيه الكسل ده"، "مش هتخسر حاجة لو جربت".
+استخدم نبرة تشجيعية بس فيها خفيفة حزم — كأنك بتزنخ على أخوك عشان يقوم يعمل حاجة مفيدة.`,
+
+    sad: `المستخدم حزين ومهموم.
+إنت الأخ/الأخت الكبير اللي بيراضي — ابدأ برد دافي ومتعاطف:
+"أنا معاك"، "ماتقلقش، ديعدّي"، "ربنا يفرجها عليك".
+خلّي ردك بسيط ومليان دعم — متشرحش حلول معقدة، بس كن معاه وجدانياً.`,
+
+    angry: `المستخدم غضبان ومتنرفز.
+إنت الأخ الكبير الحكيم — اهدّيه: "أولاد، خد نفس عميق"، "مفيش حاجة تستاهل".
+متتنرفزش معاه — خليك هادي ومتزن. استخدم لغة مصرية بسيطة وهدّاية.
+لو الغضب من حاجة معينة، اتعاطف معاه الأول وبعدين اعرض الحل بهدوء.`,
+
+    stressed: `المستخدم تحت ضغط وتوتر.
+إنت الأخ الكبير اللي بيرجّع أخوه — ابدأ بنكتة خفيفة أو كلمة تفرّج:
+"يا جدع الدنيا مش واقفة"، "خد راحة، شرب شاية".
+بعدين اعرض المساعدة بشكل عملي ومنظم — قسّم المشكلة لخطوات صغيرة.`,
+
+    confused: `المستخدم محتار ومش فاهم.
+إنت الأخ الكبير الصبور — اشرح ببساطة ومن غير تعقيد:
+"بسيطة، اللي بيحصل كذا وكذا"، "تخيلها كده...".
+استخدم أمثلة من الواقع، وخطوة خطوة من غير تسرع.`,
+
+    frustrated: `المستخدم محبط وزعلان من حاجة مش شغّالة.
+إنت الأخ الكبير اللي بيساند — "ما تقولش كده، هنحاول تاني"، "مش نهاية العالم".
+اطمنه إن المشكلة ليها حل، واعرض بديل عملي.`,
+
+    affectionate: `المستخدم بيكلمك بحب وود.
+رد بنفس الود — "يا روحي"، "يا غالي"، "أنا هنا عشانك".
+خلّي نبرتك دافية وأخوية.`,
+
+    happy: `المستخدم مبسوط ومرتاح.
+شاركه فرحته — "يا سلام!"، "ربنا يديم السعادة".
+خلّي ردك فيه طاقة إيجابية.`,
+
+    grateful: `المستخدم بيشكرك.
+رد بتواضع أخوي — "مفيش حاجة يا غالي"، "ده واجبي".
+متتكبرش، بس متقللش من نفسك برضه.`,
+
+    curious: `المستخدم فضولي وعايز يعرف.
+إنت الأخ الكبير اللي بيشرح — رد بحماس وافي:
+"سؤال حلو! اللي بيحصل كذا...".
+شجّع فضوله.`,
+
+    neutral: null, // no prefix for neutral
+  };
+
+  // Legacy negative emotions still get the supportive prefix
   const emotionDef = emotionMatrix[emotion];
-  if (!emotionDef || !emotionDef.isNegative) return null;
-  return `المستخدم يبدو عليه ${emotionDef.arabicLabel}. اجعله يشعر بالدعم والتعاطف في بداية ردك.`;
+  if (toneGuide[emotion]) return toneGuide[emotion];
+  if (emotionDef?.isNegative) {
+    return `المستخدم يبدو عليه ${emotionDef.arabicLabel}. اجعله يشعر بالدعم والتعاطف في بداية ردك.`;
+  }
+  return null;
 }
 
 // ─── Smart Auto-Search Classifier ──────────────────────────────────────

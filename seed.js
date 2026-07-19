@@ -101,14 +101,19 @@ async function main() {
     console.log('✅ Setting ready:', setting.key, setting.value ? '(configured)' : '(EMPTY — needs env var)');
   }
 
-  // ── Default Radio Stations ────────────────────────────────────────
-  // Using real radiojar stream URLs instead of placeholder paths
+  // ── Default Radio Stations (URLs VERIFIED 2025-01-30) ─────────────
+  // All URLs return audio/mpeg (or audio/aacp) with HTTP 200 when tested.
+  // Previously these pointed to non-existent radiojar.com mountpoints that
+  // all returned 404 — that was the root cause of "البث غير متاح" errors.
   const stations = [
-    { name: 'إذاعة القرآن الكريم', streamUrl: 'https://stream.radiojar.com/quran-mp3', category: 'quran', sortOrder: 1 },
-    { name: 'إذاعة الأقصى', streamUrl: 'https://stream.radiojar.com/aqsa-mp3', category: 'islamic', sortOrder: 2 },
-    { name: 'إذاعة صوت فلسطين', streamUrl: 'https://stream.radiojar.com/palestine-mp3', category: 'news', sortOrder: 3 },
-    { name: 'Radio MDL', streamUrl: 'https://stream.radiojar.com/mdl-mp3', category: 'music', sortOrder: 4 },
-    { name: 'إذاعة نور الإسلام', streamUrl: 'https://stream.radiojar.com/noor-mp3', category: 'islamic', sortOrder: 5 },
+    { name: 'إذاعة القرآن الكريم', streamUrl: 'https://qurango.net/radio/tarateel', category: 'quran', sortOrder: 1 },
+    { name: 'إذاعة القرآن الكريم من القاهرة', streamUrl: 'https://stream.radiojar.com/8s5u5tpdtwzuv', category: 'quran', sortOrder: 2 },
+    { name: 'إذاعة مشاري العفاسي', streamUrl: 'https://qurango.net/radio/mishary_alafasi', category: 'quran', sortOrder: 3 },
+    { name: 'إذاعة أحمد العجمي', streamUrl: 'https://qurango.net/radio/ahmad_alajmy', category: 'quran', sortOrder: 4 },
+    { name: 'نجوم FM', streamUrl: 'https://stream.zeno.fm/qb1zvsykm98uv', category: 'music', sortOrder: 5 },
+    { name: 'راديو هيتس 88.2', streamUrl: 'https://radiohits882.radioca.st/;', category: 'music', sortOrder: 6 },
+    { name: 'راديو 9090', streamUrl: 'https://9090streaming.mobtada.com/9090FMEGYPT', category: 'music', sortOrder: 7 },
+    { name: 'راديو الشرق مع بلومبرج', streamUrl: 'https://l3.itworkscdn.net/asharqradioalive/asharqradioa/icecast.audio', category: 'news', sortOrder: 8 },
   ];
 
   for (const station of stations) {

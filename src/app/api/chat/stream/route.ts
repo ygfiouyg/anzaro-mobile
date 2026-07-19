@@ -30,7 +30,7 @@ import { streamOpenAIChat, getOpenAIChatModelMapping, isOpenAIChatModel, OPENAI_
 import { classifyContentQuality } from '@/lib/drive-rag';
 import { processRAGQuery, uploadAndIndexLectures, hasLectureContext, getLecturesSummary, shouldUseRAG } from '@/lib/rag/rag-engine';
 import { shouldInjectContentStrategy } from '@/lib/content-strategy-prompt';
-import { isFileGenerationIntent, isQuizIntent } from '@/lib/chat-utils';
+import { isFileGenerationIntent, isQuizIntent, getZAIClient } from '@/lib/chat-utils';
 import { extractMemories } from '@/lib/user-memory.service';
 import { extractTextFromPdfBase64, extractPdfWithVlmAndText, extractTextFromDocxBase64 } from '@/lib/pdf-text-extractor';
 import { preprocessMediaAttachments, type ParsedMediaAttachment } from '@/lib/media-preprocessor';
@@ -1419,34 +1419,45 @@ export async function POST(request: NextRequest) {
                 // ✅ استخدم Zhipu CogView-3-Flash مباشرة (مجاني 100%)
                 const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
                 const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
-                const imgRes = await fetch(`${ZAI_BASE}/images/generations`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${ZAI_API_KEY}`,
-                  },
-                  body: JSON.stringify({
-                    model: 'cogview-3-flash',  // ✅ مجاني
-                    prompt: imagePrompt,
-                    size: '1024x1024',
-                  }),
-                  signal: AbortSignal.timeout(60_000),
-                });
-                if (imgRes.ok) {
-                  const imgData = await imgRes.json();
-                  const imageUrl = imgData?.data?.[0]?.url || '';
-                  if (imageUrl) {
-                    // نحمل الصورة ونحوّلها base64
-                    const imgFetch = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
-                    const buf = Buffer.from(await imgFetch.arrayBuffer());
-                    const mime = imgFetch.headers.get('content-type') || 'image/png';
-                    const base64 = `data:${mime};base64,${buf.toString('base64')}`;
-                    console.log('[Chat] ✅ CogView-3-Flash image generated — size:', buf.length);
-                    return { dataUrl: base64, prompt: mediaGenIntent!.prompt };
-                  }
+                if (!ZAI_API_KEY) {
+                  console.warn('[Chat] ZAI_API_KEY not set — skipping CogView-3-Flash, going to Pollinations');
                 } else {
-                  const err = await imgRes.text();
-                  console.warn('[Chat] CogView-3-Flash failed:', err.slice(0, 150));
+                  const imgRes = await fetch(`${ZAI_BASE}/images/generations`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${ZAI_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                      model: 'cogview-3-flash',  // ✅ مجاني
+                      prompt: imagePrompt,
+                      size: '1024x1024',
+                    }),
+                    signal: AbortSignal.timeout(60_000),
+                  });
+                  if (imgRes.ok) {
+                    const imgData = await imgRes.json();
+                    const imageUrl = imgData?.data?.[0]?.url || imgData?.data?.[0]?.b64_json || '';
+                    // If response is a URL, download and convert to base64 data URL
+                    if (imageUrl && imageUrl.startsWith('http')) {
+                      const imgFetch = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+                      const buf = Buffer.from(await imgFetch.arrayBuffer());
+                      const mime = imgFetch.headers.get('content-type') || 'image/png';
+                      const base64 = `data:${mime};base64,${buf.toString('base64')}`;
+                      console.log('[Chat] ✅ CogView-3-Flash image generated — size:', buf.length);
+                      return { dataUrl: base64, prompt: mediaGenIntent!.prompt };
+                    }
+                    // If response is already base64, use it directly
+                    if (imageUrl && imageUrl.length > 100) {
+                      const mime = 'image/png';
+                      const base64 = `data:${mime};base64,${imageUrl}`;
+                      console.log('[Chat] ✅ CogView-3-Flash image generated (base64) — size:', imageUrl.length);
+                      return { dataUrl: base64, prompt: mediaGenIntent!.prompt };
+                    }
+                  } else {
+                    const err = await imgRes.text();
+                    console.warn(`[Chat] CogView-3-Flash failed ${imgRes.status}:`, err.slice(0, 150));
+                  }
                 }
               } catch (zaiErr) {
                 console.warn('[Chat] CogView-3-Flash error, trying Pollinations:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
@@ -1509,10 +1520,94 @@ export async function POST(request: NextRequest) {
                 }
               }
 
+              // ── 1) BigModel CogVideoX-Flash (FREE — async with polling) ──
+              // Submit task → poll /async-result/{task_id} until SUCCESS or timeout (2 min)
+              try {
+                const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+                const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
+
+                if (ZAI_API_KEY) {
+                  console.log('[Chat] Submitting CogVideoX-Flash task...');
+                  const submitRes = await fetch(`${ZAI_BASE}/videos/generations`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${ZAI_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                      model: 'cogvideox-flash',  // ✅ FREE
+                      prompt: videoPrompt,
+                      duration: 5,
+                      quality: 'speed',
+                    }),
+                    signal: AbortSignal.timeout(30_000),
+                  });
+
+                  if (submitRes.ok) {
+                    const submitData = await submitRes.json();
+                    const taskId = submitData?.id || submitData?.task_id || '';
+                    if (taskId) {
+                      console.log(`[Chat] CogVideoX-Flash task started: ${taskId}`);
+                      // Poll for up to 2 minutes (24 attempts × 5s = 120s)
+                      const pollDeadline = Date.now() + 120_000;
+                      const pollInterval = 5_000;
+                      let videoUrl = '';
+
+                      while (Date.now() < pollDeadline) {
+                        try {
+                          const pollRes = await fetch(`${ZAI_BASE}/async-result/${taskId}`, {
+                            headers: { 'Authorization': `Bearer ${ZAI_API_KEY}` },
+                            signal: AbortSignal.timeout(15_000),
+                          });
+                          if (pollRes.ok) {
+                            const pollData = await pollRes.json();
+                            const status = pollData?.task_status || 'PROCESSING';
+                            console.log(`[Chat] CogVideoX poll: status=${status}`);
+
+                            if (status === 'SUCCESS') {
+                              const vResult = pollData?.video_result?.[0] || {};
+                              videoUrl = vResult.url || vResult.video_url || '';
+                              if (videoUrl) {
+                                console.log('[Chat] ✅ CogVideoX-Flash video generated:', videoUrl.slice(0, 80));
+                                return {
+                                  videoUrl,
+                                  prompt: mediaGenIntent!.prompt,
+                                };
+                              }
+                              break; // SUCCESS but no URL — try fallback
+                            }
+                            if (status === 'FAIL') {
+                              console.warn('[Chat] CogVideoX task FAILED:', pollData?.msg || 'unknown');
+                              break;
+                            }
+                          }
+                        } catch (pollErr) {
+                          console.warn('[Chat] CogVideoX poll error:', pollErr instanceof Error ? pollErr.message : String(pollErr));
+                        }
+                        await new Promise((r) => setTimeout(r, pollInterval));
+                      }
+
+                      if (!videoUrl) {
+                        console.warn('[Chat] CogVideoX-Flash: no video URL after polling, falling back to HF');
+                      }
+                    }
+                  } else {
+                    const errText = await submitRes.text().catch(() => '');
+                    console.warn(`[Chat] CogVideoX-Flash submit failed ${submitRes.status}: ${errText.slice(0, 150)}`);
+                  }
+                } else {
+                  console.warn('[Chat] ZAI_API_KEY not set — skipping CogVideoX-Flash, going straight to HF');
+                }
+              } catch (zaiErr) {
+                console.warn('[Chat] CogVideoX-Flash error, falling back to HF:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
+              }
+
+              // ── 2) Fallback: HuggingFace Gradio Spaces (CogVideoX-2B, LTX-Video) ──
               try {
                 const { generateVideoWithFallback } = await import('@/lib/hf-video.service');
                 const result = await generateVideoWithFallback(videoPrompt, ['cogvideox-2b', 'ltx-video-distilled'], { duration: 5 });
                 if (result.videoUrl) {
+                  console.log('[Chat] ✅ HF video fallback succeeded:', result.videoUrl.slice(0, 80));
                   return {
                     videoUrl: result.videoUrl,
                     prompt: mediaGenIntent!.prompt,
@@ -1520,7 +1615,7 @@ export async function POST(request: NextRequest) {
                 }
                 return null;
               } catch (videoErr) {
-                console.warn('[Chat] Inline video gen failed:', videoErr instanceof Error ? videoErr.message : String(videoErr));
+                console.warn('[Chat] Inline video gen failed (HF fallback):', videoErr instanceof Error ? videoErr.message : String(videoErr));
                 return null;
               }
             })();
@@ -1702,6 +1797,163 @@ export async function POST(request: NextRequest) {
           }
 
           try {
+            // ────────────────────────────────────────────────────────────────────
+            // TOP-LEVEL PRE-SCAN LAYER (contacts-fix-1)
+            // ────────────────────────────────────────────────────────────────────
+            // المشكلة: الـ LLM (أي provider) لما بيشوف system prompt بيقول "استخدم أداة
+            // google_contacts_reader" بيطبع JSON-as-text بدل ما يستدعي الأداة فعلاً.
+            // والحل القديم كان مدفون جوه streamFromZhipuAI() — اللي مش بيتندى أبداً
+            // (dead code). فعشان نحل المشكلة لكل الـ providers (ZAI, Pollinations,
+            // Cerebras, HF, Groq, Gemini, …) بنعمل pre-scan هنا على أعلى مستوى:
+            // لو رسالة المستخدم فيها طلب واضح لرقم/جهة اتصال → ننفّذ الأداة مباشرة
+            // → نـ format الرد (بـ LLM لو متاح، أو template كـ fallback) → نقفل الـ stream.
+            // ────────────────────────────────────────────────────────────────────
+            try {
+              const _hasImageAttachmentsPre = parsed.attachments.some((a) => a.type === 'image');
+              const _isFileGenIntent = isFileGenerationIntent(parsed.cleanedMessage || message);
+              if (!_hasImageAttachmentsPre && !_isFileGenIntent) {
+                const { executeTool } = await import('@/lib/mcp/registry');
+                const { runWithContext } = await import('@/lib/request-context');
+                const _lastUserMsg = messages.filter((m: any) => m.role === 'user').slice(-1)[0];
+                const _userText = typeof _lastUserMsg?.content === 'string'
+                  ? _lastUserMsg.content
+                  : JSON.stringify(_lastUserMsg?.content ?? '');
+                const _lowerText = _userText.toLowerCase();
+
+                const _sendPreStatus = (status: string, phase?: string) => {
+                  if (streamClosed) return;
+                  try {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ backendStatus: status, phase })}\n\n`));
+                  } catch {}
+                };
+
+                // ── كاشف طلبات جهات الاتصال ──
+                // لازم فيه فعل أمر واضح + كلمة "رقم" أو "هاتف" أو "اتصال" أو "contact"
+                const _ACTION_VERBS = /(?:هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دورلي|دور\s*لي|ابحث|عايز|عاوز|عايز\s*رقم|عاوز\s*رقم|ادّيني|اديني|إديني|جب\s*لي|جيب\s*لي)/i;
+                const _CONTACT_KEYWORDS = /(?:رقم|هاتف|اتصال|جهة\s*اتصال|contacts?|phone|موبايل|موبيل|تليفون)/i;
+                const _hasActionVerb = _ACTION_VERBS.test(_userText);
+                const _wantsContact = _hasActionVerb && _CONTACT_KEYWORDS.test(_userText);
+                const _isQuestion = /^(ايه|إيه|شنو|كام|ليه|ازاي|إزاي|امتى|إمتى|فين|مين|هل|ممكن|تقدر|تعرف|تقول|عرفني|اشرحلي|فهمني|كيف|متى|أين|من|ما هو|ما هي|ايه هو|إيه هو|ايه رايك|إيه رأيك)\b/i.test(_userText.trim());
+
+                if (_wantsContact && !_isQuestion) {
+                  console.log(`[Pre-scan-top] Contact intent detected: "${_userText}"`);
+                  _sendPreStatus("بنفّذ أداة: البحث في جهات الاتصال", "executing");
+
+                  // استخراج الاسم من رسالة المستخدم
+                  // أنماط: "هاتلي رقم X" / "جيبلي رقم X" / "دورلي على رقم X" /
+                  //        "عايز رقم X" / "ابحث عن رقم X" / "رقم X"
+                  const _contactName = _userText
+                    .replace(/.*(?:هاتلي|هات\s*لي|جيبلي|جيب\s*لي|دور\s*على\s*رقم|دورلي\s*على\s*رقم|ابحث\s*عن\s*رقم|عايز\s*رقم|عاوز\s*رقم|ادّيني\s*رقم|اديني\s*رقم|إديني\s*رقم|جب\s*لي\s*رقم|جيب\s*لي\s*رقم|رقم|تليفون|موبايل|موبيل|هاتف|phone\s*number\s*of|number\s*of)\s*/i, "")
+                    .replace(/\s*(من\s*الناحية|من\s*جهات\s*الاتصال|لو\s*سمحت|please|بليز|من\s*فضلك)\s*$/i, "")
+                    .replace(/[.?؟!]+$/g, "")
+                    .trim() || _userText;
+
+                  console.log(`[Pre-scan-top] Extracted contact name: "${_contactName}"`);
+
+                  const _contactResult = await runWithContext(request, async () => {
+                    return executeTool("google_contacts_reader", { search_name: _contactName });
+                  });
+
+                  // ── Handle failure (including "not connected") ──
+                  if (!_contactResult.success) {
+                    const _errMsg = String(_contactResult.error ?? "فشل تنفيذ الأداة.");
+                    _sendPreStatus("خلصت", "finalizing");
+                    if (/غير مربوط|مش متصل|not connected|NOT_CONNECTED|لازم تربط/i.test(_errMsg)) {
+                      enqueueContent("📞 Google Contacts مش متصل. اربط حسابك من الإعدادات (Integration Dashboard ⟶ ربط Google Workspace) عشان أقدر أجيبلك أرقام جهات الاتصال.");
+                    } else {
+                      enqueueContent(`⚠️ ${_errMsg}`);
+                    }
+                    streamClosed = true;
+                    try {
+                      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                      controller.close();
+                    } catch {}
+                    console.log('[Pre-scan-top] Contact tool failed, stream closed.');
+                    return;
+                  }
+
+                  // ── Format the result ──
+                  const _toolData = (_contactResult.data ?? {}) as any;
+                  const _contacts = (_toolData?.contacts ?? []) as Array<{ name: string; phones: string[]; emails?: string[] }>;
+                  const _queryName = _toolData?.query ?? _contactName;
+
+                  let _templateReply: string;
+                  if (!_contacts || _contacts.length === 0) {
+                    _templateReply = `ملقتش جهة اتصال مطابقة لـ "${_queryName}" في جهات اتصالك. 😕\nتأكد من الاسم أو جرّب اسم تاني.`;
+                  } else if (_contacts.length === 1) {
+                    const _c = _contacts[0];
+                    const _phone = _c.phones?.[0] ?? "—";
+                    _templateReply = `📞 ${_c.name}: ${_phone}`;
+                    if (_c.phones && _c.phones.length > 1) {
+                      _templateReply += `\nأرقام تانية: ${_c.phones.slice(1).join("، ")}`;
+                    }
+                    if (_c.emails && _c.emails.length > 0) {
+                      _templateReply += `\n📧 ${_c.emails[0]}`;
+                    }
+                  } else {
+                    _templateReply = `لقيت ${_contacts.length} جهة اتصال مطابقة لـ "${_queryName}":\n`;
+                    _contacts.slice(0, 5).forEach((_c, _i) => {
+                      const _phone = _c.phones?.[0] ?? "—";
+                      _templateReply += `${_i + 1}. ${_c.name}: ${_phone}\n`;
+                    });
+                    if (_contacts.length > 5) {
+                      _templateReply += `... و${_contacts.length - 5} جهة تانية`;
+                    }
+                  }
+
+                  // ── Try LLM formatting first, fall back to template ──
+                  _sendPreStatus("بكتب الرد النهائي...", "finalizing");
+                  let _finalReply: string | null = null;
+                  try {
+                    const _zai = await getZAIClient();
+                    const _formatPrompt = `أنت Anzaro — مساعد بسيط. نفّذت أداة "google_contacts_reader" بناءً على طلب المستخدم ("${_userText}").
+
+نتيجة الأداة (نجحت):
+${JSON.stringify(_toolData)}
+
+قواعد الرد:
+1. اكتب رد واحد فقط — ممنوع التكرار.
+2. استخدم البيانات من النتيجة فقط — ممنوع تخترع أرقام أو أسماء.
+3. لو فيه رقم هاتف، حطه بالظبط من النتيجة.
+4. الرد لازم يكون مختصر (1-3 أسطر كحد أقصى).
+5. ممنوع تستخدم emoji أكثر من مرة.
+6. لو مفيش نتائج، قول: "ملقتش جهة اتصال مطابقة لـ ${_queryName}."
+7. ⛔ ممنوع تكتب JSON أو tool calls كنص — اكتب رد عادي بالعربي للمستخدم.
+
+اكتب الرد الآن:`;
+                    const _completion = await _zai.chat.completions.create({
+                      model: 'glm-4-flash',
+                      messages: [{ role: 'system', content: _formatPrompt }],
+                      stream: false,
+                      temperature: 0.3,
+                      max_tokens: 512,
+                    } as any);
+                    const _llmText = (_completion as any).choices?.[0]?.message?.content ?? null;
+                    if (_llmText && _llmText.trim().length > 0) {
+                      _finalReply = _llmText.replace(/(.{20,})\1{1,}/g, "$1").trim();
+                    }
+                  } catch (_fmtErr) {
+                    console.warn('[Pre-scan-top] LLM formatting failed, using template:', _fmtErr instanceof Error ? _fmtErr.message : String(_fmtErr));
+                  }
+
+                  enqueueContent(_finalReply || _templateReply);
+
+                  streamClosed = true;
+                  try {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.close();
+                  } catch {}
+                  console.log('[Pre-scan-top] Contact tool executed successfully, stream closed.');
+                  return;
+                }
+              }
+            } catch (_preScanError) {
+              console.warn('[Pre-scan-top] failed (continuing to provider routing):', _preScanError instanceof Error ? _preScanError.message : String(_preScanError));
+            }
+            // ────────────────────────────────────────────────────────────────────
+            // END TOP-LEVEL PRE-SCAN LAYER
+            // ────────────────────────────────────────────────────────────────────
+
             // ── Determine provider based on modelConfig.provider ──
             // Route to the PRIMARY provider as defined in models.ts
             // Each model has a designated primary provider for optimal performance
@@ -2359,11 +2611,66 @@ ${toolData}${extraStr}
               }
             }
 
-            // ── FIRST PRIORITY: ZAI (GLM-5.2) — العميل الأساسي ──
+            // ── FIRST PRIORITY: ZAI (GLM-5.2 / GLM-4-Flash) — العميل الأساسي ──
+            // V.17: Re-enabled ZAI for zhipuai models ONLY (عبس + glm-4-flash)
+            // Other models use their own providers (HuggingFace, Groq, etc.)
             if (primaryProvider === 'zhipuai') {
-              console.log(`[Chat] Using ZAI (GLM-5.2) directly — primary provider`);
+              console.log(`[Chat] Using ZAI directly — model=${model}, provider=zhipuai`);
               try {
-                /* ZAI removed */
+                const { getZAIClient } = await import('@/lib/chat-utils');
+                const zai = await getZAIClient();
+                const zaiModel = modelConfig.glmModel || model || 'glm-4-flash';
+                console.log(`[Chat] ZAI streaming: model=${zaiModel}`);
+
+                const stream: ReadableStream<Uint8Array> = await zai.chat.completions.create({
+                  model: zaiModel,
+                  messages: messages as any,
+                  stream: true,
+                  temperature: 0.7,
+                  max_tokens: 8192,
+                });
+
+                const reader = stream.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                  if (streamClosed) break;
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop() || '';
+
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || !trimmed.startsWith('data:')) continue;
+                    const data = trimmed.slice(5).trim();
+                    if (data === '[DONE]') continue;
+
+                    try {
+                      const parsed = JSON.parse(data);
+                      const delta = parsed.choices?.[0]?.delta?.content || '';
+                      if (delta) {
+                        enqueueContent(delta);
+                      }
+                    } catch {
+                      // partial JSON — skip
+                    }
+                  }
+                }
+
+                // Stream complete
+                if (!streamClosed) {
+                  streamClosed = true;
+                  try {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.close();
+                  } catch {
+                    // already closed
+                  }
+                }
               } catch (zaiError) {
                 console.warn('[Chat] ZAI failed:', zaiError instanceof Error ? zaiError.message : String(zaiError));
                 

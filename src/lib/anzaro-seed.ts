@@ -132,40 +132,74 @@ export async function ensureSeedData() {
     tasks.push(
       db.radioStation.createMany({
         data: [
+          // ── Quran stations (all URLs VERIFIED 2025-01-30) ──
           {
-            name: 'Quran Radio Cairo',
+            name: 'إذاعة القرآن الكريم',
             category: 'quran',
-            streamUrl: 'https://qurango.net/radio/taratee',
+            streamUrl: 'https://qurango.net/radio/tarateel',
             logo: '',
             sortOrder: 1,
           },
           {
-            name: 'Holy Quran Radio',
+            name: 'إذاعة القرآن الكريم من القاهرة',
             category: 'quran',
-            streamUrl: 'https://qurango.net/radio/mix',
+            // Official ERTU Quran Radio Cairo stream (via radiojar) — VERIFIED 200 OK
+            streamUrl: 'https://stream.radiojar.com/8s5u5tpdtwzuv',
             logo: '',
             sortOrder: 2,
           },
           {
-            name: 'Nogoum FM',
-            category: 'music',
-            streamUrl: 'https://nogoumfm.net/stream',
+            name: 'إذاعة مشاري العفاسي',
+            category: 'quran',
+            streamUrl: 'https://qurango.net/radio/mishary_alafasi',
             logo: '',
             sortOrder: 3,
           },
           {
-            name: 'Radio Masr',
-            category: 'news',
-            streamUrl: 'https://streaming.radionz.net/radiomasr',
+            name: 'إذاعة أحمد العجمي',
+            category: 'quran',
+            streamUrl: 'https://qurango.net/radio/ahmad_alajmy',
             logo: '',
             sortOrder: 4,
           },
           {
-            name: 'Mawaly Nasheeds',
-            category: 'islamic',
-            streamUrl: 'https://qurango.net/radio/afasy',
+            name: 'إذاعة ماهر المعيقلي',
+            category: 'quran',
+            streamUrl: 'https://qurango.net/radio/maher_almuaiqly',
             logo: '',
             sortOrder: 5,
+          },
+          // ── Music stations (all URLs VERIFIED 2025-01-30 via radio-browser.info) ──
+          {
+            name: 'نجوم FM',
+            category: 'music',
+            // Nogoum FM via zeno.fm — VERIFIED 200 OK
+            streamUrl: 'https://stream.zeno.fm/qb1zvsykm98uv',
+            logo: '',
+            sortOrder: 6,
+          },
+          {
+            name: 'راديو هيتس 88.2',
+            category: 'music',
+            streamUrl: 'https://radiohits882.radioca.st/;',
+            logo: '',
+            sortOrder: 7,
+          },
+          {
+            name: 'راديو 9090',
+            category: 'music',
+            streamUrl: 'https://9090streaming.mobtada.com/9090FMEGYPT',
+            logo: '',
+            sortOrder: 8,
+          },
+          // ── News ──
+          {
+            name: 'راديو الشرق مع بلومبرج',
+            category: 'news',
+            // Radio Asharq — VERIFIED 200 OK + audio/aacp
+            streamUrl: 'https://l3.itworkscdn.net/asharqradioalive/asharqradioa/icecast.audio',
+            logo: '',
+            sortOrder: 9,
           },
         ],
       })

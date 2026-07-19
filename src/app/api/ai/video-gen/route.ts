@@ -1,7 +1,9 @@
 /**
  * POST /api/ai/video-gen
  * ======================
- * توليد فيديو بـ CogVideoX عبر ZhipuAI API (async).
+ * توليد فيديو بـ CogVideoX عبر BigModel / ZhipuAI API (async).
+ *
+ * Uses cogvideox-flash (FREE — no credits consumed) by default.
  *
  * Request body:
  *   { "prompt": "وصف الفيديو", "quality": "speed"|"quality", "with_audio": false }
@@ -16,17 +18,26 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
+const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
+
 export async function POST(req: NextRequest) {
   try {
+    const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+    if (!ZAI_API_KEY) {
+      return NextResponse.json(
+        { success: false, error: 'ZAI_API_KEY env var not set. Get a free key at https://open.bigmodel.cn/usercenter/apikeys' },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json();
     const {
       prompt,
       image_url,
       quality = 'speed',
       with_audio = false,
-      size = '1920x1080',
-      fps = 30,
       duration = 5,
+      model = 'cogvideox-flash',  // ✅ FREE
     } = body;
 
     if (!prompt && !image_url) {
@@ -34,11 +45,9 @@ export async function POST(req: NextRequest) {
     }
 
     const requestBody: any = {
-      model: 'cogvideox-2',
+      model,
       quality,
       with_audio,
-      size,
-      fps,
       duration,
     };
 
@@ -46,11 +55,11 @@ export async function POST(req: NextRequest) {
     if (image_url) requestBody.image_url = image_url;
 
     // CogVideoX API (async)
-    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
+    const response = await fetch(`${ZAI_BASE}/videos/generations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ZAI_API_KEY}`,
+        'Authorization': `Bearer ${ZAI_API_KEY}`,
       },
       body: JSON.stringify(requestBody),
     });
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
       success: true,
       taskId: data?.id || '',
       status: data?.task_status || 'PROCESSING',
-      model: 'cogvideox',
+      model,
     });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
@@ -79,6 +88,11 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   try {
+    const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+    if (!ZAI_API_KEY) {
+      return NextResponse.json({ success: false, error: 'ZAI_API_KEY env var not set' }, { status: 500 });
+    }
+
     const url = new URL(req.url);
     const taskId = url.searchParams.get('task_id');
 
@@ -86,9 +100,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'task_id مطلوب' }, { status: 400 });
     }
 
-    const response = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
+    const response = await fetch(`${ZAI_BASE}/async-result/${taskId}`, {
       headers: {
-        'Authorization': `Bearer ${process.env.ZAI_API_KEY}`,
+        'Authorization': `Bearer ${ZAI_API_KEY}`,
       },
     });
 
@@ -109,7 +123,7 @@ export async function GET(req: NextRequest) {
       status: data?.task_status || 'PROCESSING',
       videoUrl,
       coverUrl,
-      model: data?.model || 'cogvideox-2',
+      model: data?.model || 'cogvideox-flash',
       data,
     });
   } catch (e: any) {

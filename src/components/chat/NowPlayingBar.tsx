@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play, Pause, X, Radio, Music, Video, Type, Loader2,
-  Volume2, VolumeX, RotateCcw, AlertTriangle,
+  Volume2, VolumeX, RotateCcw, AlertTriangle, ExternalLink,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useChatStore } from '@/store/chat-store';
@@ -183,8 +183,19 @@ export function NowPlayingBar() {
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
                 onError={(e: any) => {
-                  console.error('[NowPlayingBar] Player error:', e);
+                  // ── Stream error handling ──
+                  // The most common cause is a broken/404 stream URL. We've
+                  // fixed the broken URLs in the DB seed + BUILTIN_STATIONS,
+                  // but if a third-party stream goes offline we still want a
+                  // helpful error state rather than a silent hang.
+                  console.error('[NowPlayingBar] Player error:', e, 'url=', sourceUrl);
                   setError(true);
+                }}
+                onStalled={(e: any) => {
+                  // Stalled = stream stopped sending data (common for live radio
+                  // during network blips). NOT an error — the browser will
+                  // auto-resume when data arrives. Just log for debugging.
+                  console.debug('[NowPlayingBar] Stream stalled (will auto-resume):', e);
                 }}
                 config={{
                   youtube: {
@@ -255,16 +266,28 @@ export function NowPlayingBar() {
                 </p>
               </div>
 
-              {/* Error retry */}
+              {/* Error retry + open externally */}
               {error && (
-                <button
-                  onClick={handleRetry}
-                  className="size-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  aria-label="إعادة المحاولة"
-                  title="إعادة المحاولة"
-                >
-                  <RotateCcw className="size-4" />
-                </button>
+                <>
+                  <a
+                    href={sourceUrl || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="size-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                    aria-label="فتح في تبويب جديد"
+                    title="فتح البث في تبويب جديد (للتحقق)"
+                  >
+                    <ExternalLink className="size-4" />
+                  </a>
+                  <button
+                    onClick={handleRetry}
+                    className="size-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                    aria-label="إعادة المحاولة"
+                    title="إعادة المحاولة"
+                  >
+                    <RotateCcw className="size-4" />
+                  </button>
+                </>
               )}
 
               {/* Volume (audio only) */}

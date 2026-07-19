@@ -41,13 +41,18 @@ const categoryMeta: Record<string, { icon: typeof Brain; label: string; color: s
   driver: { icon: Sparkles, label: 'محفزات', color: 'text-amber-400' },
 };
 
-const scaleLabels = [
-  'على الأقل',
-  'قليل',
-  'متوسط',
-  'كثير',
-  'على طول',
-];
+// V.17: Per-question scale labels extracted from questionAr
+// Each scale question now has "1 = ... • 5 = ..." in its questionAr
+// We parse the labels from there so each question shows relevant endpoints
+function getScaleLabels(questionAr?: string): string[] {
+  if (!questionAr) return ['أقل', 'قليل', 'متوسط', 'كثير', 'أكثر'];
+  // Match pattern: "1 = LABEL  •  5 = LABEL"
+  const match = questionAr.match(/1\s*=\s*(.+?)\s*[•·]\s*5\s*=\s*(.+)/);
+  if (match) {
+    return [match[1].trim(), '', 'متوسط', '', match[2].trim()];
+  }
+  return ['أقل', 'قليل', 'متوسط', 'كثير', 'أكثر'];
+}
 
 export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const { user } = useAuthStore();
@@ -322,12 +327,15 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                   })}
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground px-1">
-                  <span>{scaleLabels[0]}</span>
-                  <span>{scaleLabels[4]}</span>
+                  <span>{getScaleLabels(q.questionAr)[0]}</span>
+                  <span>{getScaleLabels(q.questionAr)[4]}</span>
                 </div>
                 {answers[q.id] && (
                   <p className="text-center text-sm font-semibold text-primary">
-                    {scaleLabels[Number(answers[q.id]) - 1]}
+                    {Number(answers[q.id]) === 1 ? getScaleLabels(q.questionAr)[0] :
+                     Number(answers[q.id]) === 5 ? getScaleLabels(q.questionAr)[4] :
+                     Number(answers[q.id]) === 3 ? 'متوسط' :
+                     `مائل لـ ${Number(answers[q.id]) < 3 ? getScaleLabels(q.questionAr)[0] : getScaleLabels(q.questionAr)[4]}`}
                   </p>
                 )}
               </div>

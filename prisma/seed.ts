@@ -77,37 +77,61 @@ async function main() {
     }
   }
 
-  // ── Default Radio Stations ────────────────────────────────────────
+  // ── Default Radio Stations (URLs VERIFIED 2025-01-30) ─────────────
+  // All URLs return audio/mpeg (or audio/aacp) with HTTP 200 when tested.
+  // Previously these pointed to non-existent radiojar.com mountpoints that
+  // all returned 404 — that was the root cause of "البث غير متاح" errors.
   const stations = [
     {
       name: "إذاعة القرآن الكريم",
-      streamUrl: "https://stream.radiojar.com/quran",
+      streamUrl: "https://qurango.net/radio/tarateel",
       category: "quran",
       sortOrder: 1,
     },
     {
-      name: "إذاعة الأقصى",
-      streamUrl: "https://stream.radiojar.com/aqsa",
-      category: "islamic",
+      name: "إذاعة القرآن الكريم من القاهرة",
+      // Official ERTU Quran Radio Cairo (via radiojar) — VERIFIED 200 OK
+      streamUrl: "https://stream.radiojar.com/8s5u5tpdtwzuv",
+      category: "quran",
       sortOrder: 2,
     },
     {
-      name: "إذاعة صوت فلسطين",
-      streamUrl: "https://stream.radiojar.com/palestine",
-      category: "news",
+      name: "إذاعة مشاري العفاسي",
+      streamUrl: "https://qurango.net/radio/mishary_alafasi",
+      category: "quran",
       sortOrder: 3,
     },
     {
-      name: "Radio MDL",
-      streamUrl: "https://stream.radiojar.com/mdl",
-      category: "music",
+      name: "إذاعة أحمد العجمي",
+      streamUrl: "https://qurango.net/radio/ahmad_alajmy",
+      category: "quran",
       sortOrder: 4,
     },
     {
-      name: "إذاعة نور الإسلام",
-      streamUrl: "https://stream.radiojar.com/noor",
-      category: "islamic",
+      name: "نجوم FM",
+      // Nogoum FM via zeno.fm — VERIFIED 200 OK
+      streamUrl: "https://stream.zeno.fm/qb1zvsykm98uv",
+      category: "music",
       sortOrder: 5,
+    },
+    {
+      name: "راديو هيتس 88.2",
+      streamUrl: "https://radiohits882.radioca.st/;",
+      category: "music",
+      sortOrder: 6,
+    },
+    {
+      name: "راديو 9090",
+      streamUrl: "https://9090streaming.mobtada.com/9090FMEGYPT",
+      category: "music",
+      sortOrder: 7,
+    },
+    {
+      name: "راديو الشرق مع بلومبرج",
+      // Radio Asharq — VERIFIED 200 OK + audio/aacp
+      streamUrl: "https://l3.itworkscdn.net/asharqradioalive/asharqradioa/icecast.audio",
+      category: "news",
+      sortOrder: 8,
     },
   ];
 

@@ -41,7 +41,8 @@ RUN echo 'DATABASE_URL="file:/app/db/custom.db"' > .env && \
     echo 'SESSION_SECRET="anzaro-hf-space-secret-2025-stable"' >> .env && \
     echo 'NEXTAUTH_URL="https://kopabdo-delta-ai-v2.hf.space"' >> .env && \
     echo 'NEXTAUTH_SECRET="anzaro-nextauth-secret-2025"' >> .env && \
-    echo 'NODE_ENV="production"' >> .env
+    echo 'NODE_ENV="production"' >> .env && \
+    echo 'ZAI_API_KEY=""' >> .env
 
 # Set environment variables (also as ENV for CLI tools)
 ENV NODE_ENV=production
@@ -51,6 +52,7 @@ ENV DATABASE_URL="file:/app/db/custom.db"
 ENV SESSION_SECRET="anzaro-hf-space-secret-2025-stable"
 ENV NEXTAUTH_URL="https://kopabdo-delta-ai-v2.hf.space"
 ENV NEXTAUTH_SECRET="anzaro-nextauth-secret-2025"
+# ZAI_API_KEY should be set as a HF Space Secret (not hardcoded here for security)
 
 # Create db directory, .env file, and push schema
 # The .env ensures next build can read DATABASE_URL at build time

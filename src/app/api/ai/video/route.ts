@@ -235,7 +235,134 @@ export async function POST(request: NextRequest) {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // GENERATE VIDEO VIA HUGGINGFACE
+    // GENERATE VIDEO VIA BIGMODEL (CogVideoX-Flash — FREE, async)
+    // ═══════════════════════════════════════════════════════════════
+    // Try BigModel first when:
+    //   - No image_url provided (T2V only — BigModel doesn't do I2V reliably)
+    //   - User didn't explicitly select an HF model OR selected the default
+    // If BigModel fails (content filter, network, timeout) → fall through to HF.
+    if (!image_url && (!videoModelConfig || videoModelConfig.id === DEFAULT_VIDEO_MODEL)) {
+      try {
+        const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+        const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
+
+        if (ZAI_API_KEY) {
+          traceImage(`[BigModel] Submitting CogVideoX-Flash task: "${engineOptimizedPrompt.slice(0, 60)}..."`);
+
+          const submitRes = await fetch(`${ZAI_BASE}/videos/generations`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${ZAI_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model: 'cogvideox-flash',  // ✅ FREE
+              prompt: engineOptimizedPrompt,
+              duration: duration || 5,
+              quality: quality || 'speed',
+            }),
+            signal: AbortSignal.timeout(30_000),
+          });
+
+          if (submitRes.ok) {
+            const submitData = await submitRes.json();
+            const taskId = submitData?.id || submitData?.task_id || '';
+
+            if (taskId) {
+              traceImage(`[BigModel] Task started: ${taskId}. Polling for up to 2 min...`);
+
+              // Poll for up to 2 minutes
+              const pollDeadline = Date.now() + 120_000;
+              const pollInterval = 5_000;
+              let bigModelVideoUrl = '';
+              let bigModelCoverUrl = '';
+
+              while (Date.now() < pollDeadline) {
+                try {
+                  const pollRes = await fetch(`${ZAI_BASE}/async-result/${taskId}`, {
+                    headers: { 'Authorization': `Bearer ${ZAI_API_KEY}` },
+                    signal: AbortSignal.timeout(15_000),
+                  });
+
+                  if (pollRes.ok) {
+                    const pollData = await pollRes.json();
+                    const status = pollData?.task_status || 'PROCESSING';
+
+                    if (status === 'SUCCESS') {
+                      const vResult = pollData?.video_result?.[0] || {};
+                      bigModelVideoUrl = vResult.url || vResult.video_url || '';
+                      bigModelCoverUrl = vResult.cover_image_url || '';
+                      break;
+                    }
+                    if (status === 'FAIL') {
+                      traceImage(`[BigModel] Task FAILED: ${pollData?.msg || 'unknown'}`);
+                      break;
+                    }
+                  }
+                } catch (pollErr) {
+                  traceImage(`[BigModel] Poll error: ${pollErr instanceof Error ? pollErr.message : String(pollErr)}`);
+                }
+
+                await new Promise((r) => setTimeout(r, pollInterval));
+              }
+
+              if (bigModelVideoUrl) {
+                traceImage(`[BigModel] ✅ Video generated: ${bigModelVideoUrl.slice(0, 80)}`);
+
+                traceDB('حفظ فيديو BigModel في قاعدة البيانات');
+                await db.generativeAsset.create({
+                  data: {
+                    type: 'video',
+                    title: prompt.slice(0, 100),
+                    prompt: prompt,
+                    filePath: bigModelVideoUrl,
+                    fileSize: 0,
+                    model: model || 'cogvideox-flash',
+                    metadata: JSON.stringify({
+                      provider: 'bigmodel',
+                      realModel: 'cogvideox-flash',
+                      modelUsed: 'CogVideoX-Flash',
+                      backendModel: 'cogvideox-flash',
+                      videoUrl: bigModelVideoUrl,
+                      coverUrl: bigModelCoverUrl,
+                      durationMs: Date.now() - videoStartTime,
+                      taskId,
+                    }),
+                    userId: user.id,
+                  },
+                });
+
+                reportAggregatorSuccess('bigmodel', 'video', Date.now() - videoStartTime);
+
+                return NextResponse.json({
+                  success: true,
+                  videoUrl: bigModelVideoUrl,
+                  hasVideoData: false,
+                  model: 'CogVideoX-Flash',
+                  provider: 'bigmodel',
+                  realModel: 'cogvideox-flash',
+                  backendModel: 'cogvideox-flash',
+                  coverUrl: bigModelCoverUrl,
+                  taskId,
+                });
+              } else {
+                traceImage('[BigModel] No video URL after polling — falling back to HF');
+              }
+            }
+          } else {
+            const errText = await submitRes.text().catch(() => '');
+            traceImage(`[BigModel] Submit failed ${submitRes.status}: ${errText.slice(0, 150)} — falling back to HF`);
+          }
+        } else {
+          traceImage('[BigModel] ZAI_API_KEY not set — skipping BigModel, going to HF');
+        }
+      } catch (bigModelErr) {
+        traceImage(`[BigModel] Error: ${bigModelErr instanceof Error ? bigModelErr.message : String(bigModelErr)} — falling back to HF`);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // GENERATE VIDEO VIA HUGGINGFACE (fallback)
     // ═══════════════════════════════════════════════════════════════
 
     const { generateHFVideo, getVideoModelById: getHFVideoModel } = await import('@/lib/hf-video.service');

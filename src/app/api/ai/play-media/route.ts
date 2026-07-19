@@ -15,121 +15,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { detectMediaSource, buildMediaWidget } from '@/lib/ai-tools/play-media-tool';
+import {
+  normalizeArabic,
+  matchStation as matchStationShared,
+  getDefaultStationForCategory,
+  type Station,
+} from '@/lib/radio-stations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-// ═══════════════════════════════════════════════════════════════════════
-// Verified working radio stations — direct HTTPS audio streams
-// Organized by category. All URLs verified to return audio/mpeg.
-// ═══════════════════════════════════════════════════════════════════════
-interface Station {
-  name: string;
-  streamUrl: string;
-  category: string; // quran | nasheed | music | news | sports
-  aliases?: string[]; // additional matching keywords
-}
-
-const BUILTIN_STATIONS: Station[] = [
-  // ── Quran — General (the main Quran broadcast) ──
-  // tarateel = "تراتيل/تلاوات" — this is the main 24/7 Quran recitation stream
-  { name: 'إذاعة القرآن الكريم', streamUrl: 'https://qurango.net/radio/tarateel', category: 'quran', aliases: ['قرآن', 'قران', 'quran', 'tarateel', 'تلاوات', 'تراتيل', 'تلاوة'] },
-
-  // ── Quran — By Reciter (all URLs on qurango.net/radio/ — VERIFIED WORKING) ──
-  // NOTE: backup.qurango.net is DEAD (returns 500). Use qurango.net/radio/ instead.
-  { name: 'إذاعة إبراهيم الأخضر', streamUrl: 'https://qurango.net/radio/ibrahim_alakdar', category: 'quran', aliases: ['إبراهيم', 'ابراهيم', 'الأخضر', 'الاخضر', 'ibrahim', 'alakdar'] },
-  { name: 'إذاعة أحمد العجمي', streamUrl: 'https://qurango.net/radio/ahmad_alajmy', category: 'quran', aliases: ['العجمي', 'العجمي', 'أحمد', 'احمد', 'ahmad', 'alajmy', 'ajmi'] },
-  { name: 'إذاعة إدريس أبكر', streamUrl: 'https://qurango.net/radio/idrees_abkr', category: 'quran', aliases: ['إدريس', 'ادريس', 'أبكر', 'ابكر', 'idrees', 'abkr'] },
-  { name: 'إذاعة الشيخ الشاطري', streamUrl: 'https://qurango.net/radio/shaik_abu_bakr_al_shatri', category: 'quran', aliases: ['الشاطري', 'الشاطرى', 'shatri', 'shatry'] },
-  { name: 'إذاعة مشاري العفاسي', streamUrl: 'https://qurango.net/radio/mishary_alafasi', category: 'quran', aliases: ['مشاري', 'مشارى', 'العفاسي', 'العفاسى', 'afasi', 'alafasi', 'mishary'] },
-  { name: 'إذاعة ماهر المعيقلي', streamUrl: 'https://qurango.net/radio/maher_almuaiqly', category: 'quran', aliases: ['ماهر', 'المعيقلي', 'المعيقلى', 'maher', 'muaiqly'] },
-  { name: 'إذاعة عبدالباسط عبدالصمد', streamUrl: 'https://qurango.net/radio/abdulbasit_abdulsamad', category: 'quran', aliases: ['عبدالباسط', 'عبد الباسط', 'عبدالصمد', 'abdulbasit', 'abdulsamad'] },
-  { name: 'إذاعة ياسر الدوسري', streamUrl: 'https://qurango.net/radio/yasser_aldosari', category: 'quran', aliases: ['ياسر', 'الدوسري', 'الدوسرى', 'yasser', 'dosari'] },
-  { name: 'إذاعة سعد الغامدي', streamUrl: 'https://qurango.net/radio/saad_alghamdi', category: 'quran', aliases: ['سعد', 'الغامدي', 'الغامدى', 'saad', 'ghamdi'] },
-
-  // ── Cairo/Egypt Quran radio ──
-  // qurango.net/radio/tarateel is the main Quran stream (closest to Egyptian Quran radio)
-  { name: 'إذاعة القرآن الكريم من القاهرة', streamUrl: 'https://qurango.net/radio/tarateel', category: 'quran', aliases: ['القاهرة', 'القاهره', 'cairo', 'egypt', 'مصر', 'مصري', 'مصرى', 'القاهره', 'مصرية'] },
-];
-
-// ═══════════════════════════════════════════════════════════════════════
-// Smart station matcher — scores each station by keyword overlap
-// Returns the best match (not just the first one).
-// ═══════════════════════════════════════════════════════════════════════
-function normalizeArabic(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[\u064B-\u0652]/g, '')        // strip tashkeel
-    .replace(/[إأآا]/g, 'ا')                // normalize alef
-    .replace(/ى/g, 'ي')                     // normalize alef maqsura
-    .replace(/ة/g, 'ه')                     // normalize ta marbuta
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function matchStation(query: string): Station {
-  const normQ = normalizeArabic(query);
-  const queryTokens = normQ.split(' ').filter(t => t.length > 1);
-
-  let bestStation = BUILTIN_STATIONS[0];
-  let bestScore = -1;
-
-  // Generic tokens that don't disambiguate between stations
-  const GENERIC = new Set([
-    'اذاعه', 'شغل', 'شغلى', 'شغلي', 'استمع', 'اسمع', 'افتح', 'افتحلي',
-    'play', 'قرآن', 'قران', 'quran', 'القرآن', 'القران', 'من', 'ال',
-    'الكريم', 'الكریم', 'شيخ', 'مولانا', 'الاستماع', 'بسم', 'الله',
-    'الرحمن', 'الرحيم', 'لي', 'ليّ', 'بقا', 'عشان', 'لو', 'سريع',
-  ]);
-
-  for (const station of BUILTIN_STATIONS) {
-    let score = 0;
-    const normName = normalizeArabic(station.name);
-    const normAliases = (station.aliases || []).map(normalizeArabic);
-
-    // ── 1) SPECIFIC alias match (STRONGEST signal — 30 pts each) ──
-    // Specific aliases (reciter names, city names) are the most reliable
-    // disambiguation signal. e.g. "القاهره" → Cairo station, "العجمي" → Al-Ajmi
-    for (const token of queryTokens) {
-      if (GENERIC.has(token)) continue;
-      for (const alias of normAliases) {
-        if (alias === token || alias.includes(token) || token.includes(alias)) {
-          score += 30;
-          break;
-        }
-      }
-    }
-
-    // ── 2) Token match against station name (10 pts each) ──
-    for (const token of queryTokens) {
-      if (GENERIC.has(token)) continue;
-      if (normName.includes(token)) score += 10;
-    }
-
-    // ── 3) Direct name substring match (weaker — 15 pts) ──
-    // Only counts if the station name is a substring of the query OR vice versa
-    // Reduced from 50 to 15 because this caused false matches (the general
-    // "إذاعة القرآن الكريم" name is a substring of "إذاعة القرآن الكريم من القاهرة")
-    if (normQ === normName) {
-      // Exact match — very strong
-      score += 100;
-    } else if (normName.includes(normQ) || normQ.includes(normName)) {
-      score += 15;
-    }
-
-    // ── 4) Category match (weakest — 1 pt, only for disambiguation) ──
-    const wantsQuran = /قرآن|قران|quran|قارئ|تلاوه|تلاوة/i.test(query);
-    if (wantsQuran && station.category === 'quran') score += 1;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestStation = station;
-    }
-  }
-
-  console.log(`[play-media] matchStation: query="${query}" → "${bestStation.name}" (score=${bestScore})`);
-  return bestStation;
+// ── Re-export the shared matchStation so the rest of this file keeps working ──
+// Returns the best match OR null when no station matches the query well enough.
+// The caller is responsible for deciding what to do when null is returned
+// (either fall back to a category default or ask the user to specify).
+function matchStation(query: string): Station | null {
+  return matchStationShared(query, /* minScore */ 10);
 }
 
 export async function POST(request: NextRequest) {
@@ -188,61 +90,149 @@ export async function POST(request: NextRequest) {
 // Radio Handler — fetch from Prisma RadioStation table, fallback to builtin
 // ═══════════════════════════════════════════════════════════════════════
 async function handleRadio(query: string) {
-  // Try DB first — search by name with smart matching
+  // Try DB first — search by name (broad LIKE) and score with the same
+  // normalization logic used for BUILTIN_STATIONS. The previous query used
+  // `contains: query` which is exact-substring + case-insensitive only,
+  // so "نجوم" wouldn't match a station named "Nogoum FM" (different script).
   let stations: any[] = [];
   try {
+    // Broad fetch — we'll score + filter in JS so we can normalize Arabic.
     stations = await db.radioStation.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { category: { contains: query, mode: 'insensitive' } },
-        ],
-      },
-      take: 10,
+      where: { isActive: true },
+      take: 50,
       orderBy: { sortOrder: 'asc' },
     });
   } catch { /* DB not ready */ }
 
-  // If DB has matches, score them too (don't blindly pick first)
+  // Score DB stations with the same normalizeArabic + token logic.
   if (stations.length > 0) {
     const normQ = normalizeArabic(query);
-    let bestDb = stations[0];
-    let bestDbScore = -1;
+    const queryTokens = normQ.split(' ').filter(t => t.length > 1);
+
+    const GENERIC = new Set([
+      'شغل', 'شغلى', 'شغلي', 'استمع', 'اسمع', 'افتح', 'افتحلي', 'play',
+      'قرآن', 'قران', 'quran', 'القرآن', 'القران', 'الكريم', 'من', 'ال',
+      'محطة', 'محطه', 'station', 'radio', 'راديو', 'إذاعة', 'اذاعة', 'اذاعه',
+      'fm', 'اف ام', 'لي', 'بقا', 'عشان', 'لو', 'سريع',
+    ]);
+
+    let bestDb: any = null;
+    let bestDbScore = 0;
     for (const s of stations) {
       const normName = normalizeArabic(s.name || '');
-      let score = normName.includes(normQ) ? 50 : 0;
-      const qTokens = normQ.split(' ').filter(t => t.length > 1);
-      for (const t of qTokens) {
-        if (normName.includes(t)) score += 10;
+      const normCategory = normalizeArabic(s.category || '');
+      let score = 0;
+      for (const t of queryTokens) {
+        if (GENERIC.has(t)) continue;
+        if (normName.includes(t)) score += 20;
+        if (normCategory.includes(t)) score += 5;
       }
+      if (normQ === normName) score += 100;
+      else if (normName && (normName.includes(normQ) || normQ.includes(normName))) score += 25;
+
       if (score > bestDbScore) {
         bestDbScore = score;
         bestDb = s;
       }
     }
+
+    // Require a minimum score to accept a DB match — otherwise we'd silently
+    // pick stations[0] for unrelated queries (the original bug).
+    if (bestDb && bestDbScore >= 15) {
+      console.log(`[play-media] DB match: "${bestDb.name}" (score=${bestDbScore})`);
+      return NextResponse.json({
+        content: `جاري تشغيل ${bestDb.name}...`,
+        mediaWidget: buildMediaWidget({
+          source: 'radio',
+          title: bestDb.name,
+          streamUrl: bestDb.streamUrl,
+          autoPlay: true,
+        }),
+      });
+    }
+  }
+
+  // ── Use the smart matcher against built-in stations ──
+  const matched = matchStation(query);
+
+  if (matched) {
     return NextResponse.json({
-      content: `جاري تشغيل ${bestDb.name}...`,
+      content: `جاري تشغيل ${matched.name}...`,
       mediaWidget: buildMediaWidget({
         source: 'radio',
-        title: bestDb.name,
-        streamUrl: bestDb.streamUrl,
+        title: matched.name,
+        streamUrl: matched.streamUrl,
         autoPlay: true,
       }),
     });
   }
 
-  // Use the smart matcher against built-in stations
-  const matched = matchStation(query);
+  // ── Last-resort: if the user asked for a generic category (قرآن/أخبار/موسيقى)
+  //    without specifying a name, pick the category default so playback at
+  //    least starts. This is intentional — "شغل قرآن" should always play Quran.
+  // ──
+  const q = query.toLowerCase();
+  if (/قرآن|قران|quran|تلاوه|تلاوة|قارئ/i.test(q)) {
+    const def = getDefaultStationForCategory('quran');
+    console.log(`[play-media] no specific match — defaulting to "${def.name}"`);
+    return NextResponse.json({
+      content: `جاري تشغيل ${def.name}...`,
+      mediaWidget: buildMediaWidget({
+        source: 'radio',
+        title: def.name,
+        streamUrl: def.streamUrl,
+        autoPlay: true,
+      }),
+    });
+  }
+  if (/أخبار|اخبار|news|نشرة/i.test(q)) {
+    const def = getDefaultStationForCategory('news');
+    return NextResponse.json({
+      content: `جاري تشغيل ${def.name}...`,
+      mediaWidget: buildMediaWidget({
+        source: 'radio',
+        title: def.name,
+        streamUrl: def.streamUrl,
+        autoPlay: true,
+      }),
+    });
+  }
+  if (/موسيقى|موسيقي|music|أغاني|اغاني|songs/i.test(q)) {
+    const def = getDefaultStationForCategory('music');
+    return NextResponse.json({
+      content: `جاري تشغيل ${def.name}...`,
+      mediaWidget: buildMediaWidget({
+        source: 'radio',
+        title: def.name,
+        streamUrl: def.streamUrl,
+        autoPlay: true,
+      }),
+    });
+  }
+  if (/رياضة|رياضه|sport|sports|كرة/i.test(q)) {
+    const def = getDefaultStationForCategory('sports');
+    return NextResponse.json({
+      content: `جاري تشغيل ${def.name}...`,
+      mediaWidget: buildMediaWidget({
+        source: 'radio',
+        title: def.name,
+        streamUrl: def.streamUrl,
+        autoPlay: true,
+      }),
+    });
+  }
 
+  // ── Truly no match — ask the user to specify ──
+  // Returning a content message (not an HTTP error) keeps the chat flowing.
   return NextResponse.json({
-    content: `جاري تشغيل ${matched.name}...`,
-    mediaWidget: buildMediaWidget({
-      source: 'radio',
-      title: matched.name,
-      streamUrl: matched.streamUrl,
-      autoPlay: true,
-    }),
+    content:
+      `مقدرش ألاقي محطة باسم "${query}". 🤔\n` +
+      `جرّب تكتب اسم المحطة بالعربي أو الإنجليزي، مثلاً:\n` +
+      `• "شغل إذاعة القرآن" — البث الرئيسي\n` +
+      `• "شغل قرآن العجمي" أو "العفاسي" أو "ماهر المعيقلي"\n` +
+      `• "شغل نجوم FM" أو "راديو هيتس"\n` +
+      `• "شغل راديو الشرق" — الأخبار`,
+    mediaWidget: null,
   });
 }
 
