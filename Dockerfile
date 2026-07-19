@@ -35,12 +35,22 @@ RUN npx prisma generate 2>/dev/null || true
 # Copy source code
 COPY . .
 
-# Set environment variables
+# Create .env file with production values (HF Space doesn't have .env from git)
+# This ensures DATABASE_URL is available to both Prisma CLI and Next.js runtime
+RUN echo 'DATABASE_URL="file:/app/db/custom.db"' > .env && \
+    echo 'SESSION_SECRET="anzaro-hf-space-secret-2025-stable"' >> .env && \
+    echo 'NEXTAUTH_URL="https://kopabdo-delta-ai-v2.hf.space"' >> .env && \
+    echo 'NEXTAUTH_SECRET="anzaro-nextauth-secret-2025"' >> .env && \
+    echo 'NODE_ENV="production"' >> .env
+
+# Set environment variables (also as ENV for CLI tools)
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV DATABASE_URL="file:/app/db/custom.db"
 ENV SESSION_SECRET="anzaro-hf-space-secret-2025-stable"
+ENV NEXTAUTH_URL="https://kopabdo-delta-ai-v2.hf.space"
+ENV NEXTAUTH_SECRET="anzaro-nextauth-secret-2025"
 
 # Create db directory and push schema
 RUN mkdir -p /app/db && npx prisma db push --skip-generate 2>/dev/null || true
