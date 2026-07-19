@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { existsSync } from 'fs'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
@@ -22,20 +23,16 @@ function resolveDatabaseUrl(): string {
   if (envUrl && envUrl.startsWith('file:')) return envUrl
 
   // 2. Hardcoded fallbacks for known environments
-  // HF Space Docker container
-  // Local dev sandbox
   const candidates = [
     'file:/app/db/custom.db',                    // HF Space Docker
     'file:/home/z/my-project/db/custom.db',      // Local dev sandbox
   ]
 
-  const fs = require('fs')
   for (const candidate of candidates) {
     const path = candidate.replace('file:', '')
     try {
-      // Check if the directory exists (file may not exist yet — prisma db push creates it)
       const dir = path.substring(0, path.lastIndexOf('/'))
-      if (fs.existsSync(dir)) return candidate
+      if (existsSync(dir)) return candidate
     } catch {
       // fs not available in some environments — skip
     }
