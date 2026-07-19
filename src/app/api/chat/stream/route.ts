@@ -4060,25 +4060,73 @@ ${toolData}${extraStr}
         } catch (sdkError) {
           console.error('SDK streaming error:', sdkError);
 
-          // Note: Don't reset globalThis._zaiClient here — it can break concurrent requests
-          // Instead, the next getZAIClient() call will create a fresh client if needed
           try {
             recordError('/api/chat/stream', sdkError instanceof Error ? sdkError.message : 'SDK streaming error');
           } catch (recordErr) {
             console.warn('[Chat] recordError failed (non-critical):', recordErr instanceof Error ? recordErr.message : String(recordErr));
           }
 
+          // ── V.19: Final fallback to ZAI (glm-4-flash FREE) before giving up ──
+          // If the user's selected model failed (e.g., HuggingFace 402 credits depleted,
+          // Groq rate limit, etc.), try ZAI glm-4-flash which is always free.
+          if (!streamClosed) {
+            console.log('[Chat] Final fallback: trying ZAI glm-4-flash (free model)');
+            try {
+              const { getZAIClient } = await import('@/lib/chat-utils');
+              const zai = await getZAIClient();
+              const zaiResponse = await zai.chat.completions.create({
+                model: 'glm-4-flash',
+                messages: messages as any,
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 8192,
+              });
+
+              if (zaiResponse && typeof zaiResponse[Symbol.asyncIterator] === 'function') {
+                let gotContent = false;
+                for await (const chunk of zaiResponse) {
+                  if (streamClosed) break;
+                  const delta = chunk?.choices?.[0]?.delta?.content || '';
+                  if (delta) {
+                    if (!gotContent) {
+                      gotContent = true;
+                      console.log('[Chat] ZAI fallback succeeded — streaming response');
+                    }
+                    enqueueContent(delta);
+                  }
+                }
+                if (gotContent) {
+                  // ZAI fallback worked — close stream and return
+                  streamClosed = true;
+                  try {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.close();
+                  } catch {}
+                  return;
+                }
+              }
+            } catch (zaiFallbackError) {
+              console.warn('[Chat] ZAI fallback also failed:', zaiFallbackError instanceof Error ? zaiFallbackError.message : String(zaiFallbackError));
+            }
+          }
+
+          // If ZAI fallback also failed, return the error message
           if (!streamClosed) {
             streamClosed = true;
             try {
-              const fallback = FALLBACK_RESPONSE;
+              // V.19: Better error message — tell user to switch to glm-4-flash-zai
+              const errorMsg = sdkError instanceof Error ? sdkError.message : String(sdkError);
+              const is402 = errorMsg.includes('402') || errorMsg.includes('depleted') || errorMsg.includes('credits');
+              const userMessage = is402
+                ? 'رصيد الموديل ده خلص. بدّل لموديل **glm-4-flash-zai** (مجاني) من القائمة اللي فوق، وهشتغللك فوراً. ✅'
+                : 'حصل خطأ في الاتصال. بدّل لموديل **glm-4-flash-zai** (مجاني) من القائمة اللي فوق.';
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ content: fallback })}\n\n`)
+                encoder.encode(`data: ${JSON.stringify({ content: userMessage })}\n\n`)
               );
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
             } catch {
-              // Controller already closed (e.g., by timeout)
+              // Controller already closed
             }
           }
         }

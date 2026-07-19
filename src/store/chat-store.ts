@@ -248,7 +248,7 @@ export const useChatStore = create<ChatState>()(
     (set, get): ChatState => ({
       conversations: [],
       activeConversationId: null,
-      activeModel: null as string | null, // V.14: No hardcoded fallback — user must select from Dashboard
+      activeModel: 'glm-4-flash-zai' as string | null, // V.19: Default to free ZAI model (عبس)
       activeLanguage: 'egyptian',
       isStreaming: false,
       streamingProgress: null,
