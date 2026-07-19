@@ -2,9 +2,8 @@
   "expo": {
     "name": "Anzaro",
     "slug": "anzaro-mobile",
-    "version": "2.6.0",
+    "version": "3.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0f0f1e",
       "resizeMode": "contain"
