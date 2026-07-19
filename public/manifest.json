@@ -1,0 +1,39 @@
+{
+  "name": "Anzaro AI — الكرة الذكية",
+  "short_name": "Anzaro",
+  "description": "منصة أنظاره — ذكاء اصطناعي عربي متكامل مع الكرة الذكية والتحكم المنزلي",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f0f1e",
+  "theme_color": "#7c3aed",
+  "dir": "rtl",
+  "lang": "ar",
+  "categories": ["productivity", "lifestyle", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "محادثة جديدة",
+      "url": "/?action=new_chat",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "الأجهزة",
+      "url": "/?action=devices",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -30,8 +30,18 @@ export const metadata: Metadata = {
   description: "Anzaro AI — منصة الذكاء الاصطناعي العربي. شات، توليد صور، بودكاست، راديو، والمزيد.",
   keywords: ["Anzaro AI", "انزارو", "AI", "Arabic AI", "ذكاء اصطناعي", "شات", "توليد صور", "بودكاست"],
   authors: [{ name: "Anzaro AI" }],
+  manifest: "/manifest.json",
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/icon-192.png",
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Anzaro",
+  },
+  formatDetection: {
+    telephone: false,
   },
   openGraph: {
     title: "Anzaro AI — ذكاء اصطناعي عربي",
@@ -47,14 +57,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
-  ],
+  themeColor: "#0f0f1e",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
