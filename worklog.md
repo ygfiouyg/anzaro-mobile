@@ -1733,3 +1733,33 @@ Stage Summary:
 - ⏳ الـ Docker build بياخد 3-5 دقايق على HF
 
 *Last updated: 2025-01-30 (Round 26) · HF Space config fixed — building now*
+
+---
+Task ID: hf-runtime-fix
+Agent: main (Z.ai Code)
+Task: إصلاح Internal Server Error على HF Space
+
+Work Log:
+- راقبت الـ HF Space بعد الـ config fix — الـ status كان RUNNING بس HTTP 500
+- قرأت الـ runtime logs واكتشفت السبب:
+  `Error: ENOENT: no such file or directory, open '/app/.next/dev/required-server-files.json'`
+- المشكلة: `next dev` بيحاول يقرأ ملف من `.next/dev/` بس الملف مش موجود لأن الـ `.next/` اتمسح
+- الحل: عدّلت Dockerfile عشان يعمل `next build` أثناء الـ Docker build (pre-build)
+- غيرت الـ CMD من `next dev` لـ `next start` (production mode) — بيقرأ من `.next/` الجاهز
+- عملت force push للـ HF Space
+- راقبت الـ build logs: `next build` اشتغل 80 ثانية ونجح
+- بعد الـ container ما بدأ، الـ Space بقت بترجع HTTP 200
+
+### Verification:
+- ✅ HTTP 200: `https://kopabdo-delta-ai-v2.hf.space/`
+- ✅ Page title: "Anzaro AI — ذكاء اصطناعي عربي"
+- ✅ Onboarding API: بيرجع 18 سؤال
+- ✅ Space status: RUNNING (cpu-basic)
+
+Stage Summary:
+- **الـ HF Space شغال بالكامل** — التطبيق بيفتح وبيـ render صح
+- الـ Docker build بياخد ~3 دقايق (Node install + Prisma + next build)
+- الـ production mode (`next start`) أسرع وأكثر استقراراً من dev mode
+- كل الـ features متاحة: onboarding، chat، media player، personality injection
+
+*Last updated: 2025-01-30 (Round 27) · HF Space live — https://kopabdo-delta-ai-v2.hf.space*
