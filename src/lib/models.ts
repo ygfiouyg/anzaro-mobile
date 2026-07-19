@@ -88,19 +88,19 @@ export const models: AIModel[] = [
   {
     id: 'glm-5-2',
     name: 'عبس',
-    nameEn: 'GLM-5.2',
+    nameEn: 'GLM-5',
     icon: '⚡',
     category: 'global',
-    glmModel: 'zai-org/GLM-5.2',
-    provider: 'huggingface',
-    realChatModel: 'zai-org/GLM-5.2',
+    glmModel: 'glm-5',
+    provider: 'zhipuai',
+    realChatModel: 'glm-5',
     realImageModel: 'cogview-3-flash',
     realVideoModel: 'cogvideox-flash',
-    hfChatModel: 'zai-org/GLM-5.2',
+    hfChatModel: '',
     openrouterChatModel: '',
-    rank: '🚀 الأسطوري 705B',
-    description: 'عبس — مساعدك الذكي المدعوم بـ GLM-5.2 من Z.ai (705 مليار بارامتر). بيدعم: شات، رؤية، توليد صور، فيديو، صوت، وبحث في النت. 1M context window.',
-    descriptionEn: 'Abbas — Powered by Z.ai GLM-5.2 (705B params). Supports: chat, vision, image gen, video gen, TTS, ASR, web search. 1M context window.',
+    rank: '🚀 الأسطوري (مهام تقيلة)',
+    description: 'عبس — مساعدك الذكي المدعوم بـ GLM-5 من BigModel (مجاني). متخصص للمهام التقيلة: تحليل معقد، كود، استدلال عميق. بيدعم: شات، رؤية، توليد صور، فيديو، صوت.',
+    descriptionEn: 'Abbas — Powered by GLM-5 from BigModel (free). Specialized for heavy tasks: complex analysis, code, deep reasoning. Supports: chat, vision, image gen, video gen, TTS.',
     systemPrompt: `أنت "عبس" — مساعد ذكي عربي مدعوم بـ GLM-5.2 من Z.ai (705 مليار بارامتر). أنت ودود ومفيد ومتعدد القدرات. ترد بالعربية الفصحى أو العامية المصرية حسب طلب المستخدم.
 
 قدراتك الأساسية:
