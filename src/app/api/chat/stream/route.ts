@@ -2622,7 +2622,7 @@ ${toolData}${extraStr}
                 const zaiModel = modelConfig.glmModel || model || 'glm-4-flash';
                 console.log(`[Chat] ZAI streaming: model=${zaiModel}`);
 
-                const stream: ReadableStream<Uint8Array> = await zai.chat.completions.create({
+                const streamResponse = await zai.chat.completions.create({
                   model: zaiModel,
                   messages: messages as any,
                   stream: true,
@@ -2630,33 +2630,38 @@ ${toolData}${extraStr}
                   max_tokens: 8192,
                 });
 
-                const reader = stream.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-
-                while (true) {
-                  if (streamClosed) break;
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split('\n');
-                  buffer = lines.pop() || '';
-
-                  for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || !trimmed.startsWith('data:')) continue;
-                    const data = trimmed.slice(5).trim();
-                    if (data === '[DONE]') continue;
-
-                    try {
-                      const parsed = JSON.parse(data);
-                      const delta = parsed.choices?.[0]?.delta?.content || '';
-                      if (delta) {
-                        enqueueContent(delta);
-                      }
-                    } catch {
-                      // partial JSON — skip
+                // The ZAI proxy returns an async iterable (not a ReadableStream)
+                // So we use for-await to consume it
+                if (streamResponse && typeof streamResponse[Symbol.asyncIterator] === 'function') {
+                  for await (const chunk of streamResponse) {
+                    if (streamClosed) break;
+                    const delta = chunk?.choices?.[0]?.delta?.content || '';
+                    if (delta) {
+                      enqueueContent(delta);
+                    }
+                  }
+                } else if (streamResponse?.body?.getReader) {
+                  // Fallback: real ReadableStream (if ZAI SDK returns one)
+                  const reader = streamResponse.body.getReader();
+                  const decoder = new TextDecoder();
+                  let buffer = '';
+                  while (true) {
+                    if (streamClosed) break;
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    for (const line of lines) {
+                      const trimmed = line.trim();
+                      if (!trimmed || !trimmed.startsWith('data:')) continue;
+                      const data = trimmed.slice(5).trim();
+                      if (data === '[DONE]') continue;
+                      try {
+                        const parsed = JSON.parse(data);
+                        const delta = parsed.choices?.[0]?.delta?.content || '';
+                        if (delta) enqueueContent(delta);
+                      } catch {}
                     }
                   }
                 }
