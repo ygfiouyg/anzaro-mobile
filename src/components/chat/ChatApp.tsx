@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, XCircle, FileText, CheckCircle, XCircle as XIcon, Music } from 'lucide-react';
+import { Loader2, XCircle, FileText, CheckCircle, XCircle as XIcon, Music, FileAudio } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
@@ -25,6 +25,7 @@ import { VideoGenDialog } from './VideoGenDialog';
 import { ImageSearchDialog } from './ImageSearchDialog';
 import { SmartBallOverlay } from '@/components/anzaro/SmartBallOverlay';
 import { NowPlayingBar } from './NowPlayingBar';
+import { AudioTranscriptionPanel } from '@/components/audio/AudioTranscriptionPanel';
 import {
   Sheet,
   SheetContent,
@@ -46,6 +47,7 @@ export function ChatApp({ onSwitchToPdfCreator }: ChatAppProps = {}) {
   const [skillsPanelOpen, setSkillsPanelOpen] = useState(false);
   const [toolsGalleryOpen, setToolsGalleryOpen] = useState(false);
   const [musicPlayerOpen, setMusicPlayerOpen] = useState(false);
+  const [audioPanelOpen, setAudioPanelOpen] = useState(false);
   const [broadcastDismissed, setBroadcastDismissed] = useState(false);
 
   // ── Dialog state for slash commands ──
@@ -795,6 +797,17 @@ export function ChatApp({ onSwitchToPdfCreator }: ChatAppProps = {}) {
           </SheetContent>
         </Sheet>
       )}
+
+      {/* V.31: Audio Transcription */}
+      <button onClick={() => setAudioPanelOpen(!audioPanelOpen)} className="fixed bottom-24 left-4 z-50 flex items-center justify-center w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 active:scale-95 transition-all" title="تحليل الريكوردات الصوتية" aria-label="تحليل صوتي">
+        <FileAudio className="h-5 w-5" />
+      </button>
+      <Sheet open={audioPanelOpen} onOpenChange={setAudioPanelOpen}>
+        <SheetContent side="left" className="p-0 w-[400px] max-w-[90vw] gap-0 overflow-hidden card border-border" dir="rtl">
+          <SheetHeader className="sr-only"><SheetTitle>تحليل الريكوردات</SheetTitle><SheetDescription>رفع وتحليل الملفات الصوتية</SheetDescription></SheetHeader>
+          <AudioTranscriptionPanel />
+        </SheetContent>
+      </Sheet>
 
       {/* Smart Ball floating overlay — orb + control panel (devices/scenes/routines) */}
       <SmartBallOverlay />

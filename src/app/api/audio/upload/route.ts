@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken, extractBearerToken } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { transcribeAudioFile, estimateDuration } from '@/lib/audio/transcription-pipeline';
-import { writeFileSync, readFileSync, mkdirSync, unlinkSync, appendFileSync } from 'fs';
+import { writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-export const maxDuration = 600;
+/**
+ * V.32: Upload Endpoint — accepts chunks, saves to disk, returns 202 IMMEDIATELY.
+ * NO processing here — just save chunks and return fast.
+ *
+ * When the last chunk arrives:
+ * 1. Save the merged file path to DB
+ * 2. Return 202 with recordId
+ * 3. Frontend calls /api/audio/process to start processing
+ */
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,14 +34,13 @@ export async function POST(request: NextRequest) {
     const mimeType = (formData.get('mimeType') as string) || file.type || 'audio/mpeg';
     const ext = filename.split('.').pop()?.toLowerCase() || 'm4a';
 
-    // Chunked upload: append chunks to temp file (skip validation for chunks)
+    // Chunked upload
     if (chunkIndex !== null && totalChunks !== null && uploadId) {
       const tmpDir = join(tmpdir(), 'anzaro-uploads');
       mkdirSync(tmpDir, { recursive: true });
       const tmpFile = join(tmpDir, `${uploadId}.bin`);
 
       const chunkBuffer = Buffer.from(await file.arrayBuffer());
-
       if (chunkIndex === '0') {
         writeFileSync(tmpFile, chunkBuffer);
       } else {
@@ -42,72 +49,67 @@ export async function POST(request: NextRequest) {
 
       const currentChunk = parseInt(chunkIndex) + 1;
       const total = parseInt(totalChunks);
-      console.error(`[Audio] Chunk ${currentChunk}/${total} received (${(chunkBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+      console.error(`[Upload] Chunk ${currentChunk}/${total} saved (${(chunkBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
 
-      // Last chunk? Process the full file
+      // Last chunk? Create DB record + return 202 — NO processing!
       if (currentChunk === total) {
-        const fullBuffer = readFileSync(tmpFile);
-        const fileSize = fullBuffer.length;
-        const duration = estimateDuration(fileSize, mimeType);
-
-        console.error(`[Audio] All chunks received. Total: ${(fileSize / 1024 / 1024).toFixed(1)}MB. Processing with ffmpeg + Whisper...`);
-
-        // Create DB record
         const record = await db.audioRecord.create({
-          data: { userId: user.id, filename, fileSize, duration, mimeType, status: 'processing', progress: 0, chunksCount: 0 },
+          data: {
+            userId: user.id,
+            filename,
+            fileSize: 0, // will be updated by process endpoint
+            duration: 0,
+            mimeType,
+            status: 'pending',
+            progress: 0,
+            chunksCount: 0,
+            storagePath: tmpFile, // save path so process endpoint can read it
+          },
         });
 
-        try {
-          const result = await transcribeAudioFile(fullBuffer, mimeType, async (p, t) => {
-            await db.audioRecord.update({ where: { id: record.id }, data: { progress: Math.round((p / t) * 100), processedChunks: p, chunksCount: t } }).catch(() => {});
-          });
-
-          // DELETE from DB — privacy
-          await db.audioRecord.delete({ where: { id: record.id } }).catch(() => {});
-          try { unlinkSync(tmpFile); } catch {}
-
-          console.error(`[Audio] Done: ${result.text.length} chars`);
-          return NextResponse.json({
-            status: 'transcribed', progress: 100,
-            transcript: result.text, language: result.language,
-            duration, filename,
-          });
-        } catch (err) {
-          await db.audioRecord.delete({ where: { id: record.id } }).catch(() => {});
-          try { unlinkSync(tmpFile); } catch {}
-          console.error('[Audio] Failed:', err);
-          return NextResponse.json({ error: err instanceof Error ? err.message : 'فشل التحليل' }, { status: 500 });
-        }
+        console.error(`[Upload] All chunks received. Record: ${record.id}. Path: ${tmpFile}`);
+        return NextResponse.json({
+          id: record.id,
+          status: 'pending',
+          message: 'تم الرفع. اضغط "بدء التحليل" للمعالجة',
+        }, { status: 202 });
       }
 
       return NextResponse.json({ status: 'uploading', chunk: currentChunk, total });
     }
 
     // Single file upload (under 10MB)
-    if (file.size > 500 * 1024 * 1024) return NextResponse.json({ error: 'حجم كبير' }, { status: 400 });
     const validExts = ['mp3','wav','m4a','mp4','ogg','aac','webm','flac','opus','wma'];
     if (!validExts.includes(ext)) return NextResponse.json({ error: 'نوع غير مدعوم' }, { status: 400 });
 
-    const fileSize = file.size;
-    const duration = estimateDuration(fileSize, mimeType);
+    const tmpDir = join(tmpdir(), 'anzaro-uploads');
+    mkdirSync(tmpDir, { recursive: true });
+    const uploadId = `single-${Date.now()}`;
+    const tmpFile = join(tmpDir, `${uploadId}.bin`);
     const buffer = Buffer.from(await file.arrayBuffer());
+    writeFileSync(tmpFile, buffer);
 
     const record = await db.audioRecord.create({
-      data: { userId: user.id, filename, fileSize, duration, mimeType, status: 'processing', progress: 0, chunksCount: 0 },
+      data: {
+        userId: user.id,
+        filename,
+        fileSize: file.size,
+        duration: 0,
+        mimeType,
+        status: 'pending',
+        progress: 0,
+        chunksCount: 0,
+        storagePath: tmpFile,
+      },
     });
 
-    try {
-      const result = await transcribeAudioFile(buffer, mimeType, async (p, t) => {
-        await db.audioRecord.update({ where: { id: record.id }, data: { progress: Math.round((p / t) * 100), processedChunks: p, chunksCount: t } }).catch(() => {});
-      });
-      await db.audioRecord.delete({ where: { id: record.id } }).catch(() => {});
-      return NextResponse.json({ status: 'transcribed', progress: 100, transcript: result.text, language: result.language, duration, filename });
-    } catch (err) {
-      await db.audioRecord.delete({ where: { id: record.id } }).catch(() => {});
-      return NextResponse.json({ error: err instanceof Error ? err.message : 'فشل' }, { status: 500 });
-    }
+    return NextResponse.json({
+      id: record.id,
+      status: 'pending',
+      message: 'تم الرفع. اضغط "بدء التحليل" للمعالجة',
+    }, { status: 202 });
   } catch (error) {
-    console.error('[Audio] Error:', error);
+    console.error('[Upload] Error:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'حدث خطأ' }, { status: 500 });
   }
 }
