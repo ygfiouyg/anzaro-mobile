@@ -175,6 +175,7 @@ export async function* streamCloudflareChat(
   const resBody = response.body as ReadableStream<Uint8Array> | null;
   if (!resBody) {
     if (timeoutId) clearTimeout(timeoutId);
+    console.error('[Cloudflare] No response body for streaming');
     throw new Error('No response body for Cloudflare streaming');
   }
 
@@ -183,12 +184,23 @@ export async function* streamCloudflareChat(
 
   try {
     let buffer = '';
+    let chunkCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log(`[Cloudflare] Stream ended. Total chunks: ${chunkCount}`);
+        break;
+      }
 
-      buffer += decoder.decode(value, { stream: true });
+      const decoded = decoder.decode(value, { stream: true });
+      buffer += decoded;
+      chunkCount++;
+
+      // Log first chunk for debugging
+      if (chunkCount === 1) {
+        console.log(`[Cloudflare] First chunk received (${decoded.length} chars): ${decoded.slice(0, 100)}`);
+      }
 
       // Parse SSE lines
       const lines = buffer.split('\n');
