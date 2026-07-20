@@ -908,3 +908,27 @@ model McpTool {
 
   @@index([category])
 }
+
+// V.27: Audio Transcription Records
+model AudioRecord {
+  id            String   @id @default(cuid())
+  userId        String
+  filename      String
+  fileSize      Int
+  duration      Int      @default(0)
+  mimeType      String   @default("audio/mpeg")
+  status        String   @default("pending")
+  progress      Int      @default(0)
+  errorMessage  String?
+  transcript    String?
+  language      String?
+  chunksCount   Int      @default(0)
+  processedChunks Int    @default(0)
+  audioUrl      String?
+  transcriptUrl String?
+  storagePath   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([userId])
+  @@index([status])
+}
