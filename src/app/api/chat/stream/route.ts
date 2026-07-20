@@ -2666,14 +2666,21 @@ ${toolData}${extraStr}
                   }
                 }
 
-                // Stream complete
+                // Stream complete — but DON'T close yet if image/video generation is in progress
+                // V.25: Wait for imageGenPromise/videoGenPromise before closing
                 if (!streamClosed) {
-                  streamClosed = true;
-                  try {
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                    controller.close();
-                  } catch {
-                    // already closed
+                  // Check if we need to wait for image/video generation
+                  if (imageGenPromise || videoGenPromise) {
+                    console.log('[Chat] Stream done, waiting for media generation before close...');
+                    // Don't close — let the post-stream code handle it
+                  } else {
+                    streamClosed = true;
+                    try {
+                      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                      controller.close();
+                    } catch {
+                      // already closed
+                    }
                   }
                 }
               } catch (zaiError) {
