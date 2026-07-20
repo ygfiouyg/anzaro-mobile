@@ -87,4 +87,4 @@ EXPOSE 3000
 # 2. `next start` serves the prebuilt app (falls back to `next dev` if the
 #    build had failed).
 CMD npx prisma db push --skip-generate --accept-data-loss 2>&1 | tail -10; \
-    npx next dev -p 3000 -H 0.0.0.0 --webpack
+    npx next start -p 3000 -H 0.0.0.0
