@@ -30,8 +30,8 @@ RUN if [ -f bun.lock ]; then \
       npm install; \
     fi
 
-# Generate Prisma client
-RUN npx prisma generate 2>/dev/null || true
+# Generate Prisma client (V.27: must succeed — AudioRecord model needed)
+RUN npx prisma generate
 # Validate the schema parses cleanly against the postgresql provider.
 # This does NOT touch the DB — it just confirms schema syntax.
 RUN npx prisma validate 2>/dev/null || true
