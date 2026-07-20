@@ -131,11 +131,10 @@ export async function* streamCloudflareChat(
     top_p,
   } = request;
 
-  // Cloudflare Workers AI supports OpenAI-compatible endpoint with streaming
-  const url = `${getCF_ApiBase()}/v1/chat/completions`;
+  // V.23: Use /run/{model} endpoint (more reliable than /v1/chat/completions)
+  const url = `${getCF_ApiBase()}/run/${model}`;
 
   const body: Record<string, unknown> = {
-    model,
     messages,
     stream: true,
     temperature,
@@ -143,7 +142,7 @@ export async function* streamCloudflareChat(
   };
   if (top_p !== undefined) body.top_p = top_p;
 
-  console.log(`[Cloudflare] Streaming chat: model=${model}, messages=${messages.length}, account=${getCF_AccountId() ? 'SET' : 'EMPTY'}, token=${getCF_ApiToken() ? 'SET' : 'EMPTY'}`);
+  console.log(`[Cloudflare] Streaming chat: model=${model}, url=${url}, account=${getCF_AccountId() ? 'SET' : 'EMPTY'}, token=${getCF_ApiToken() ? 'SET' : 'EMPTY'}`);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
