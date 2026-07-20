@@ -983,7 +983,7 @@ export const useChatStore = create<ChatState>()(
             get().updateMessage(
               conversationId,
               assistantMessage.id,
-              'يا حبيبي، حصل خطأ في الاتصال بالـ AI. تأكد إن ZAI_API_KEY متاح في HF Spaces Settings. جرّب تاني بعد ما تضيف المفتاح.'
+              'الموديل ده مش متاح حالياً. جرّب موديل تاني من القائمة اللي فوق — عبس (GLM-5) أو GLM-4-Flash مجانيين وشغالين. ✅'
             );
           }
 

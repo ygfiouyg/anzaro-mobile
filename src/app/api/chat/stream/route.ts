@@ -3683,20 +3683,26 @@ ${toolData}${extraStr}
           if (!streamClosed) {
             try {
               // ── Send generated image if ready ──
+              // V.25: Wait for image generation to complete BEFORE closing stream
               if (imageGenPromise) {
+                console.log('[Chat] Waiting for image generation to complete...');
                 try {
                   const imageResult = await imageGenPromise;
-                  if (imageResult && !streamClosed) {
+                  console.log('[Chat] Image generation completed:', imageResult ? 'SUCCESS' : 'NULL');
+                  if (imageResult) {
                     controller.enqueue(
                       encoder.encode(`data: ${JSON.stringify({ generatedImage: imageResult })}\n\n`)
                     );
-                  } else if (!imageResult && !streamClosed) {
+                  } else {
                     controller.enqueue(
                       encoder.encode(`data: ${JSON.stringify({ imageGenStatus: 'failed' })}\n\n`)
                     );
                   }
                 } catch (imgErr) {
                   console.warn('[Chat] Inline image gen error:', imgErr);
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({ imageGenStatus: 'failed' })}\n\n`)
+                  );
                 }
               }
 
