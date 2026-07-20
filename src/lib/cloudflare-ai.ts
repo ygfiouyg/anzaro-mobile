@@ -133,8 +133,7 @@ export async function* streamCloudflareChat(
 
   // V.23: Use /run/{model} endpoint (more reliable than /v1/chat/completions)
   // V.24: Use NON-streaming mode (HF Space has 10s timeout on streaming fetch)
-  const encodedModel = encodeURIComponent(model);
-  const url = `${getCF_ApiBase()}/run/${encodedModel}`;
+  const url = `${getCF_ApiBase()}/run/${model}`;
 
   const body: Record<string, unknown> = {
     messages,
