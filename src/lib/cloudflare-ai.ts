@@ -143,7 +143,7 @@ export async function* streamCloudflareChat(
   };
   if (top_p !== undefined) body.top_p = top_p;
 
-  console.log(`[Cloudflare] Streaming chat: model=${model}, messages=${messages.length}`);
+  console.log(`[Cloudflare] Streaming chat: model=${model}, messages=${messages.length}, account=${getCF_AccountId() ? 'SET' : 'EMPTY'}, token=${getCF_ApiToken() ? 'SET' : 'EMPTY'}`);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
@@ -166,7 +166,9 @@ export async function* streamCloudflareChat(
   if (!response.ok) {
     if (timeoutId) clearTimeout(timeoutId);
     const errorText = await response.text().catch(() => '');
-    console.error(`[Cloudflare] Streaming chat error ${response.status}: ${errorText.slice(0, 200)}`);
+    console.error(`[Cloudflare] Streaming chat error ${response.status}: ${errorText.slice(0, 300)}`);
+    console.error(`[Cloudflare] URL was: ${url}`);
+    console.error(`[Cloudflare] Token was: ${getCF_ApiToken() ? getCF_ApiToken().slice(0,10) + '...' : 'EMPTY'}`);
     throw new Error(`Cloudflare streaming error ${response.status}: ${errorText.slice(0, 200)}`);
   }
 
