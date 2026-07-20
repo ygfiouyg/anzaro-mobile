@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const mimeType = (formData.get('mimeType') as string) || file.type || 'audio/mpeg';
     const ext = filename.split('.').pop()?.toLowerCase() || 'm4a';
 
-    // Chunked upload: append chunks to a temp file
+    // Chunked upload: append chunks to temp file (skip validation for chunks)
     if (chunkIndex !== null && totalChunks !== null && uploadId) {
       const tmpDir = join(tmpdir(), 'anzaro-uploads');
       mkdirSync(tmpDir, { recursive: true });
