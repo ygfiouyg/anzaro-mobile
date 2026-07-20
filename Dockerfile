@@ -5,13 +5,14 @@
 
 FROM node:20-slim
 
-# Install system dependencies for sharp, bcrypt, prisma
+# Install system dependencies for sharp, bcrypt, prisma, ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
     python3 \
     make \
     g++ \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
