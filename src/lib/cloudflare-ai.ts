@@ -19,11 +19,22 @@ const EMBEDDED_CF_API_TOKEN = '';
 
 // ─── API Key (env var priority → embedded fallback) ─────────────────
 // V.21: Support multiple env var names for flexibility
-export const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID || EMBEDDED_CF_ACCOUNT_ID;
-export const CF_API_TOKEN = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || EMBEDDED_CF_API_TOKEN;
+// V.22: Use getters for lazy evaluation — env vars may not be available at module load
+export function getCF_AccountId(): string {
+  return process.env.CF_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID || EMBEDDED_CF_ACCOUNT_ID;
+}
+export function getCF_ApiToken(): string {
+  return process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || EMBEDDED_CF_API_TOKEN;
+}
+// Keep backward-compatible exports (evaluated at call time via getters)
+export const CF_ACCOUNT_ID = getCF_AccountId();
+export const CF_API_TOKEN = getCF_ApiToken();
 
 // ─── API Base URL ──────────────────────────────────────────────────
-const CF_API_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai`;
+// V.22: Compute at call time to ensure env vars are read at runtime
+function getCF_ApiBase(): string {
+  return `https://api.cloudflare.com/client/v4/accounts/${getCF_AccountId()}/ai`;
+}
 
 // ─── Default Timeouts ──────────────────────────────────────────────
 const STREAM_TIMEOUT_MS = 300_000; // 5 min
@@ -91,7 +102,7 @@ export function isCloudflareChatModel(modelId: string): boolean {
 
 function getCloudflareHeaders(): Record<string, string> {
   return {
-    'Authorization': `Bearer ${CF_API_TOKEN}`,
+    'Authorization': `Bearer ${getCF_ApiToken()}`,
     'Content-Type': 'application/json',
   };
 }
@@ -121,7 +132,7 @@ export async function* streamCloudflareChat(
   } = request;
 
   // Cloudflare Workers AI supports OpenAI-compatible endpoint with streaming
-  const url = `${CF_API_BASE}/v1/chat/completions`;
+  const url = `${getCF_ApiBase()}/v1/chat/completions`;
 
   const body: Record<string, unknown> = {
     model,
@@ -223,7 +234,7 @@ export async function generateCloudflareChat(
   } = request;
 
   // Use the /run/{model} endpoint for non-streaming
-  const url = `${CF_API_BASE}/run/${model}`;
+  const url = `${getCF_ApiBase()}/run/${model}`;
 
   const body = {
     messages,
