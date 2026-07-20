@@ -255,9 +255,12 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
   }
 
   // ── Device: TURN ON ──
+  // V.20: Fixed regex — "ac" was matching "spectroscopic", "organic", etc.
+  // Now requires word boundary or Arabic context to avoid false triggers.
   if (/(?:ولّع|ولع|افتح|شغّل|turn on|open|fire up|ابدأ)/i.test(lower) &&
-      /(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت|light|tv|screen|ac|fan|curtain|softbox)/i.test(lower)) {
-    const aliasMatch = lower.match(/(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت بوكس|السوفت|light|tv|screen|ac|fan|curtain|softbox|نور|لمبة|تكييف|مرور|ستارة)/)
+      /(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت|light|tv|screen|\bac\b|fan|curtain|softbox)/i.test(lower) &&
+      !/(?:محاضرة|spectroscop|organic|analysis|chemistry|تحليل|كيمياء|ملخص|لخص|محتوى|نص)/i.test(lower)) {
+    const aliasMatch = lower.match(/(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت بوكس|السوفت|light|tv|screen|\bac\b|fan|curtain|softbox|نور|لمبة|تكييف|مرور|ستارة)/)
     const alias = aliasMatch?.[0] || ''
     return {
       type: 'device_on',
@@ -280,7 +283,7 @@ export async function detectSmartBallCommand(message: string): Promise<SmartBall
 
   // ── Device: TURN OFF ──
   if (/(?:اقفل|قفل|اطفي|طفّي|أطفأ|turn off|close|kill)/i.test(lower) &&
-      /(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت|light|tv|screen|ac|fan|curtain|softbox)/i.test(lower) &&
+      /(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت|light|tv|screen|\bac\b|fan|curtain|softbox)/i.test(lower) &&
       !/(?:راديو|أغنية|radio|song|music|قرآن|قران)/i.test(lower)) {
     const aliasMatch = lower.match(/(?:النور|اللمبة|الشاشة|التلفزيون|التكييف|المرور|الستارة|السوفت بوكس|السوفت|light|tv|screen|ac|fan|curtain|softbox|نور|لمبة|تكييف|مرور|ستارة)/)
     const alias = aliasMatch?.[0] || ''
