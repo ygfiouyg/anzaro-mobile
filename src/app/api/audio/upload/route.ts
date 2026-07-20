@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken, extractBearerToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { transcribeAudioFile, estimateDuration } from '@/lib/audio/transcription-pipeline';
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 600;
+
 export async function POST(request: NextRequest) {
   try {
     const token = extractBearerToken(request.headers.get('Authorization'));
