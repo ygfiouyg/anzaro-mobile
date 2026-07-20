@@ -18,8 +18,9 @@ const EMBEDDED_CF_ACCOUNT_ID = '';
 const EMBEDDED_CF_API_TOKEN = '';
 
 // ─── API Key (env var priority → embedded fallback) ─────────────────
-export const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || EMBEDDED_CF_ACCOUNT_ID;
-export const CF_API_TOKEN = process.env.CF_API_TOKEN || EMBEDDED_CF_API_TOKEN;
+// V.21: Support multiple env var names for flexibility
+export const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID || EMBEDDED_CF_ACCOUNT_ID;
+export const CF_API_TOKEN = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || EMBEDDED_CF_API_TOKEN;
 
 // ─── API Base URL ──────────────────────────────────────────────────
 const CF_API_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai`;
