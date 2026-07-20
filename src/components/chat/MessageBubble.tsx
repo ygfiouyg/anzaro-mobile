@@ -802,6 +802,14 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
               <span />
               <span />
             </div>
+          ) : isStreaming ? (
+            // V.20: During streaming, render as plain text (fast) — no markdown parsing.
+            // Markdown re-parsing on every chunk causes the "all text appears at once" bug.
+            // Once streaming ends, the full content is rendered with ReactMarkdown below.
+            <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {message.content}
+              <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+            </div>
           ) : (
             <div className="markdown-content prose prose-sm dark:prose-invert max-w-none break-words overflow-x-auto">
               <ReactMarkdown

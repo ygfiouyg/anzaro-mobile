@@ -1,49 +1,53 @@
 import { PrismaClient } from '@prisma/client'
-import { existsSync } from 'fs'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Prisma Client Initialization — HF Space / Production-safe
+// Prisma Client Initialization — Supabase PostgreSQL (production-safe)
 // ═══════════════════════════════════════════════════════════════════════
-// Next.js production build INLINES process.env vars at build time.
-// If DATABASE_URL is empty/undefined during build, it stays undefined at
-// runtime even if the ENV var is set. This causes Prisma to fail with:
-//   "Error validating datasource db: the URL must start with the protocol file:"
+// The app now uses Supabase PostgreSQL (persistent across HF Space rebuilds).
+// The DATABASE_URL and DIRECT_URL env vars are configured as HF Space Secrets.
 //
-// Solution: resolve the DB URL with a hardcoded fallback that works on
-// HF Space (/app/db/custom.db) and locally (/home/z/my-project/db/custom.db).
+// Next.js production build INLINES process.env vars at build time. If
+// DATABASE_URL is empty/undefined during build, it stays undefined at runtime
+// even if the ENV var is later set. To prevent silent SQLite fallbacks that
+// caused the previous data-loss bug, we now HARD-FAIL if DATABASE_URL is
+// missing instead of guessing a file path.
 // ═══════════════════════════════════════════════════════════════════════
 
 function resolveDatabaseUrl(): string {
-  // 1. Explicit env var (set in Dockerfile ENV or .env)
   const envUrl = process.env.DATABASE_URL
-  if (envUrl && envUrl.startsWith('file:')) return envUrl
-
-  // 2. Hardcoded fallbacks for known environments
-  const candidates = [
-    'file:/app/db/custom.db',                    // HF Space Docker
-    'file:/home/z/my-project/db/custom.db',      // Local dev sandbox
-  ]
-
-  for (const candidate of candidates) {
-    const path = candidate.replace('file:', '')
-    try {
-      const dir = path.substring(0, path.lastIndexOf('/'))
-      if (existsSync(dir)) return candidate
-    } catch {
-      // fs not available in some environments — skip
-    }
+  if (envUrl && envUrl.trim().length > 0) {
+    return envUrl.trim()
   }
 
-  // 3. Final fallback — let Prisma create the DB file
-  return 'file:/app/db/custom.db'
+  // Hard-fail: no silent SQLite fallback (caused data loss on HF Space).
+  throw new Error(
+    '[DB] FATAL: DATABASE_URL env var is not set. ' +
+      'Configure it as a HF Space Secret pointing to your Supabase PostgreSQL connection string ' +
+      '(format: postgresql://postgres.<project>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres). ' +
+      'Also set DIRECT_URL for migrations (port 5432).'
+  )
 }
 
 const databaseUrl = resolveDatabaseUrl()
-console.log('[DB] Using DATABASE_URL:', databaseUrl)
+
+// Mask credentials when logging — never print the password.
+function maskUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.password) u.password = '***'
+    if (u.username) u.username = u.username // keep username for debugging
+    return u.toString()
+  } catch {
+    // Not a URL (shouldn't happen with postgresql:// but be safe)
+    return url.replace(/:[^:@/]+@/, ':***@')
+  }
+}
+
+console.log('[DB] Using DATABASE_URL:', maskUrl(databaseUrl))
 
 export const db = globalForPrisma.prisma ?? new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['query'] : ['error'],

@@ -2208,3 +2208,91 @@ Stage Summary:
 - **الـ HF Space جاهز للاستخدام**
 
 *Last updated: 2025-01-30 (Round 29) · ZAI key + stream fix — all free models working*
+
+---
+Task ID: supabase-migration-1
+Agent: Senior Database Engineer (sub-agent)
+Task: Migrate Anzaro AI from SQLite to Supabase PostgreSQL (persistent DB across HF Space rebuilds)
+
+### Why
+The HF Space rebuilds were wiping the SQLite DB (`/app/db/custom.db`) on every deploy, causing all user data (accounts, conversations, personality profiles, devices, etc.) to be lost. Supabase PostgreSQL provides a persistent, managed DB that survives container rebuilds.
+
+### Schema Audit (41 models, 0 breaking changes)
+Scanned the full `prisma/schema.prisma` (910 lines) for SQLite-specific features before migrating:
+
+- **`@db.Text` annotations**: 0 found → nothing to remove
+- **`Json` type fields**: 0 found — all JSON-like fields are stored as `String` (e.g. `filesJson`, `inputsJson`, `toolsJson`, `driversJson`, `attributesJson`, `aliasesJson`, `actionsJson`, `triggerJson`, `capabilities`, `metadata`, `parameters`, `executeCode`, `codeFiles`, `frontendHtml`, `backendCode`, `attachments`, `aiReview`, etc.). The app code already does manual `JSON.parse`/`JSON.stringify` on these, so leaving them as `String` (→ PostgreSQL `TEXT`) is the safe choice. Converting to Prisma `Json` would break the app code and is explicitly out of scope ("keep all models and fields exactly the same").
+- **`@map` table renames**: 12 tables use snake_case names (`hf_disabled_models`, `custom_models`, `github_skills`, `installed_tools`, `anzaro_apps`, `document_memory`, `mcp_jobs`, `mcp_job_steps`, `custom_agents`, `external_mcp_servers`, `spotify_tokens`, `reminders`). These work identically on PostgreSQL.
+- **`cuid()` IDs, `@default(now())`, `@updatedAt`, `@@unique`, `@@index`, `onDelete: Cascade|SetNull`**: all native PostgreSQL features — no changes needed.
+
+### Files Changed
+
+**1. `prisma/schema.prisma`** (lines 5-9)
+```diff
+ datasource db {
+-  provider = "sqlite"
+-  url      = env("DATABASE_URL")
++  provider  = "postgresql"
++  url       = env("DATABASE_URL")
++  directUrl = env("DIRECT_URL")
+ }
+```
+`directUrl` is required by Supabase: the pooler URL (port 6543, `DATABASE_URL`) is used for runtime queries, while the direct connection (port 5432, `DIRECT_URL`) is used by `prisma db push` / migrations to bypass the PgBouncer transaction pooler (which doesn't support DDL).
+
+**2. `src/lib/db.ts`** — full rewrite of `resolveDatabaseUrl()`
+- ❌ Removed hardcoded SQLite fallbacks: `file:/app/db/custom.db`, `file:/home/z/my-project/db/custom.db`
+- ❌ Removed `existsSync` directory probing
+- ✅ Now reads ONLY `process.env.DATABASE_URL` and throws a clear, actionable error if it is missing/unset (instead of silently falling back to a file URL that gets wiped on rebuild)
+- ✅ Added `maskUrl()` helper that strips the password from connection strings before `console.log` — prevents credential leakage in container logs
+- ✅ Kept the `globalForPrisma` singleton pattern (prevents connection exhaustion on Next.js hot-reload in dev)
+
+**3. `Dockerfile`**
+- ❌ Removed `touch /app/db/custom.db` (no SQLite file anymore)
+- ❌ Removed the `file:/app/db/custom.db` value from the `.env` write step and from `ENV DATABASE_URL=...` (it was shadowing the real Supabase URL)
+- ❌ Removed build-time `npx prisma db push` (the build container has no access to HF Space Secrets, so it always failed silently with `|| true`)
+- ✅ Added `npx prisma validate` step right after `prisma generate` — catches schema syntax errors early in CI
+- ✅ Added build-time placeholder `ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"` (and same for `DIRECT_URL`). This is required because Next.js evaluates `db.ts` at module-load during `next build` prerender — without a syntactically-valid postgres URL, `new PrismaClient()` throws and the build fails. HF Space Secrets override this ENV at runtime, so the real Supabase URL is used when the container actually serves traffic.
+- ✅ Kept `mkdir -p /app/db` (no harm; legacy code may still reference the path)
+- ✅ Moved `prisma db push --skip-generate --accept-data-loss` into the `CMD` (container startup). At runtime HF Space Secrets are present, so the push actually reaches Supabase and syncs the schema idempotently on every cold start. `--accept-data-loss` skips the interactive prompt for the (empty) initial push.
+
+### Verification (in this sandbox)
+
+| Check | Result |
+|---|---|
+| `npx prisma validate` (with placeholder env vars) | ✅ "The schema at prisma/schema.prisma is valid 🚀" |
+| `npx prisma migrate diff --from-empty --to-schema-datamodel --script` | ✅ Generates valid PostgreSQL DDL (`CREATE TABLE "User" (...)`, `TIMESTAMP(3)`, `BOOLEAN`, `CONSTRAINT "User_pkey" PRIMARY KEY ("id")`, etc.) — confirmed the postgresql engine is active |
+| `npx prisma generate` | ✅ Generated Prisma Client v6.11.1 with postgresql provider |
+| Runtime smoke test: `new PrismaClient({datasourceUrl: 'postgresql://...'})` | ✅ Instantiates cleanly |
+| `bun run db:push` with placeholder URL | ❌ `P1001: Can't reach database server at localhost:5432` — expected (sandbox has no real DB). Confirms the only blocker is the absence of real Supabase credentials locally; schema/CLI are fully PostgreSQL-ready. |
+| `eslint src/lib/db.ts` | ✅ 0 errors, 0 warnings |
+| Grep for `@db.Text`, `provider = "sqlite"`, `custom.db`, `file:/app/db` in source | ✅ 0 matches (only matches are historical notes in worklog.md and an unrelated `dialect` description string in `sql-query-generator.ts`) |
+
+### Models Migrated to PostgreSQL (41 total)
+Core: `User`, `OtpCode`, `Conversation`, `Message`, `Session`, `AdminSettings`, `GenerativeAsset`, `Podcast`, `RadioStation`, `VoiceBroadcast`
+Aggregator: `ApiEndpoint`, `UserMemory`, `ApiValidationLog`, `ApiAggregationJob`
+Gamification: `Achievement`, `UserAchievement`, `DailyChallenge`, `ChallengeCompletion`, `UserStats`
+Prompts/Models: `SystemPromptOverride`, `HFDisabledModel`, `CustomModel`
+Skill Importer: `GitHubSkill`, `InstalledTool`, `AnzaroApp`
+Document Memory: `DocumentMemory`
+MCP/Jobs: `McpJob`, `JobStep`, `CustomAgent`, `ExternalMcpServer`, `McpTool`
+Integrations: `SpotifyToken`, `Reminder`, `UserIntegration`
+Smart Ball / HA: `PersonalityProfile`, `Device`, `MediaSession`, `MoodScene`, `QuickAction`, `Routine`, `ProactiveNudge`
+
+### What happens on the next HF Space deploy
+1. `docker build` runs `npx prisma generate` + `npx prisma validate` + `npx next build` — all succeed because the placeholder `DATABASE_URL` is a syntactically-valid postgres URL.
+2. Container starts. HF Space injects Secrets → `DATABASE_URL` and `DIRECT_URL` now point to Supabase pooler (port 6543) and direct (port 5432) URLs.
+3. `CMD` runs `npx prisma db push --skip-generate --accept-data-loss` → creates all 41 tables (and 12 `@map`-renamed tables, indexes, unique constraints, foreign keys with `onDelete: Cascade`/`SetNull`) in the Supabase `public` schema. Idempotent — safe on every cold start.
+4. `next start` serves the app. All Prisma queries hit Supabase. Data now persists across rebuilds. ✅
+
+### Issues Encountered
+- **`DIRECT_URL` env var not present locally** → `prisma validate` failed initially with `P1012: Environment variable not found: DIRECT_URL`. Fixed by exporting a placeholder locally for validation; in production HF Space provides the real value as a Secret.
+- **`next build` would hard-fail without a valid postgres URL** → because `db.ts` instantiates `PrismaClient` at module load and now throws if `DATABASE_URL` is unset. Mitigated by adding a build-time placeholder `ENV DATABASE_URL` in the Dockerfile (overridden at runtime by HF Secrets).
+- **Build-time `prisma db push` is useless on HF Spaces** (secrets aren't exposed to `RUN` commands). Moved the push to `CMD` so it runs at container start with secrets present.
+
+### Next Actions for the User
+1. **Verify HF Space Secrets are set** (the user said they are): `DATABASE_URL` (Supabase pooler, port 6543), `DIRECT_URL` (Supabase direct, port 5432), `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`. The first two are the only ones Prisma reads.
+2. **Push the repo & rebuild the HF Space.** On first cold start, `prisma db push` will create all 41 tables in Supabase. Check the HF Space logs for `🚀  Your database is now in sync with your Prisma schema.` (or tail of `prisma db push` output).
+3. **Optional one-time local push** (to verify Supabase connectivity from outside HF): `DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres' DIRECT_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.supabase.com:5432/postgres' bun run db:push`. Cannot be done from this sandbox (no creds).
+4. **Optional hardening**: convert the `String`-typed JSON fields (`filesJson`, `inputsJson`, `toolsJson`, `driversJson`, etc.) to Prisma `Json` type in a follow-up task — PostgreSQL supports native `jsonb` which enables server-side JSON queries. NOT done here because it would require updating every `JSON.parse`/`JSON.stringify` call site in the app (out of scope for "keep all models and fields exactly the same").
+
+*Last updated: 2025-01-30 · supabase-migration-1 · SQLite → Supabase PostgreSQL complete; schema validated; 41 models preserved unchanged.*
