@@ -132,20 +132,22 @@ export async function* streamCloudflareChat(
   } = request;
 
   // V.23: Use /run/{model} endpoint (more reliable than /v1/chat/completions)
-  const url = `${getCF_ApiBase()}/run/${model}`;
+  // V.24: Use NON-streaming mode (HF Space has 10s timeout on streaming fetch)
+  const encodedModel = encodeURIComponent(model);
+  const url = `${getCF_ApiBase()}/run/${encodedModel}`;
 
   const body: Record<string, unknown> = {
     messages,
-    stream: true,
+    stream: false, // Non-streaming to avoid HF Space 10s timeout
     temperature,
     max_tokens,
   };
   if (top_p !== undefined) body.top_p = top_p;
 
-  console.log(`[Cloudflare] Streaming chat: model=${model}, url=${url}, account=${getCF_AccountId() ? 'SET' : 'EMPTY'}, token=${getCF_ApiToken() ? 'SET' : 'EMPTY'}`);
+  console.log(`[Cloudflare] Non-streaming chat: model=${model}, url=${url}, account=${getCF_AccountId() ? 'SET' : 'EMPTY'}, token=${getCF_ApiToken() ? 'SET' : 'EMPTY'}`);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60s for non-streaming
 
   let response: Response;
   try {
@@ -165,70 +167,31 @@ export async function* streamCloudflareChat(
   if (!response.ok) {
     if (timeoutId) clearTimeout(timeoutId);
     const errorText = await response.text().catch(() => '');
-    console.error(`[Cloudflare] Streaming chat error ${response.status}: ${errorText.slice(0, 300)}`);
-    console.error(`[Cloudflare] URL was: ${url}`);
-    console.error(`[Cloudflare] Token was: ${getCF_ApiToken() ? getCF_ApiToken().slice(0,10) + '...' : 'EMPTY'}`);
-    throw new Error(`Cloudflare streaming error ${response.status}: ${errorText.slice(0, 200)}`);
+    console.error(`[Cloudflare] Chat error ${response.status}: ${errorText.slice(0, 300)}`);
+    throw new Error(`Cloudflare error ${response.status}: ${errorText.slice(0, 200)}`);
   }
 
-  const resBody = response.body as ReadableStream<Uint8Array> | null;
-  if (!resBody) {
-    if (timeoutId) clearTimeout(timeoutId);
-    console.error('[Cloudflare] No response body for streaming');
-    throw new Error('No response body for Cloudflare streaming');
-  }
-
-  const reader = resBody.getReader();
-  const decoder = new TextDecoder();
-
+  // V.24: Non-streaming response — parse JSON and yield as single chunk
   try {
-    let buffer = '';
-    let chunkCount = 0;
+    const data = await response.json();
+    const content = data?.result?.choices?.[0]?.message?.content 
+                 || data?.choices?.[0]?.message?.content 
+                 || data?.result?.response 
+                 || '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        console.log(`[Cloudflare] Stream ended. Total chunks: ${chunkCount}`);
-        break;
-      }
-
-      const decoded = decoder.decode(value, { stream: true });
-      buffer += decoded;
-      chunkCount++;
-
-      // Log first chunk for debugging
-      if (chunkCount === 1) {
-        console.log(`[Cloudflare] First chunk received (${decoded.length} chars): ${decoded.slice(0, 100)}`);
-      }
-
-      // Parse SSE lines
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-
-        const dataStr = trimmed.slice(5).trim();
-        if (!dataStr || dataStr === '[DONE]') continue;
-
-        try {
-          const data = JSON.parse(dataStr);
-          const delta = data.choices?.[0]?.delta;
-          if (delta?.content) {
-            yield { content: delta.content };
-          }
-          if (data.choices?.[0]?.finish_reason) {
-            yield { finishReason: data.choices[0].finish_reason };
-          }
-        } catch {
-          // Skip invalid JSON lines
-        }
-      }
+    if (content) {
+      console.log(`[Cloudflare] Success! Content length: ${content.length} chars`);
+      yield { content };
+      yield { finishReason: 'stop' };
+    } else {
+      console.error(`[Cloudflare] No content in response: ${JSON.stringify(data).slice(0, 200)}`);
+      throw new Error('No content in Cloudflare response');
     }
+  } catch (parseError) {
+    console.error(`[Cloudflare] Parse error: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+    throw parseError;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
-    reader.releaseLock();
   }
 }
 
