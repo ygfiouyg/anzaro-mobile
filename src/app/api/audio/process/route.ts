@@ -56,10 +56,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Audio file not found' }, { status: 404 });
   }
 
-  // V.33: Resume support — if status is 'processing' with partial work,
-  // resume from the last completed segment instead of starting over.
-  // The 409 lock is REMOVED to allow resume after timeout/crash.
-  const startSegment = record.status === 'processing' && record.processedChunks > 0
+  // V.36c: Resume support — if status is 'processing' OR 'failed' with partial
+  // work, resume from the last completed segment instead of starting over.
+  // This handles both: (a) HF proxy timeout killing the SSE stream, and
+  // (b) container restarts. The partial transcript is loaded from DB.
+  const startSegment = (record.status === 'processing' || record.status === 'failed') && record.processedChunks > 0
     ? record.processedChunks
     : 0;
 
