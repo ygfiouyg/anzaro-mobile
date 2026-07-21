@@ -112,10 +112,20 @@ export function detectMediaIntent(message: string): MediaIntent {
 
   // ── 0) STOP intent: user wants to stop/close current media ──
   // Check this FIRST — "اقفل الراديو" should not be interpreted as "play radio"
-  if (/اقفل|اقفله|اقفلي|قفل|وقف|وقفه|قفلي|سكته|اسكت|إيقاف|ايقاف|stop|pause|mute|كتم|صامت|close\s+(?:the\s+)?(?:radio|player|music)|shut\s*up/i.test(message)) {
+  //
+  // SECURITY: Arabic stop-words are matched as-is (they won't appear in base64
+  // attachment data because base64 is ASCII-only). English stop-words (stop,
+  // pause, mute, close, shut up) MUST use word boundaries (\b) so they don't
+  // match random substrings inside base64 blobs or long ASCII text.
+  // Without \b, a 1MB base64 PDF randomly contains "stop"/"mute" and falsely
+  // triggers the media STOP intent, returning "تمام، اتقفل 🔇" instead of
+  // processing the attachment.
+  const hasArabicStop = /(?:اقفل|اقفله|اقفلي|قفل|وقف|وقفه|قفلي|سكته|اسكت|إيقاف|ايقاف|كتم|صامت)/i.test(message);
+  const hasEnglishStop = /(?:\bstop\b|\bpause\b|\bmute\b|close\s+(?:the\s+)?(?:radio|player|music)|shut\s*up)/i.test(message);
+  if (hasArabicStop || hasEnglishStop) {
     // Only treat as stop if there's no "play" verb alongside
     const hasPlayVerb = /شغل|افتح|ابعت|play|start|put\s*on/i.test(message);
-    if (!hasPlayVerb || /اقفل|وقف|إيقاف|stop/i.test(message)) {
+    if (!hasPlayVerb || /اقفل|وقف|إيقاف|\bstop\b/i.test(message)) {
       return { wantsMedia: true, action: 'stop', source: undefined, query: message, confidence: 0.95 };
     }
   }

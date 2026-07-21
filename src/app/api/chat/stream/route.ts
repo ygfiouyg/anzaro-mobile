@@ -333,7 +333,16 @@ export async function POST(request: NextRequest) {
     //   "خليني أسمع حاجة هادية"             → radio (context: calm)
     //
     // Falls back to regex ONLY if the LLM call fails (network/timeout).
-    try {
+    //
+    // CRITICAL: Skip media detection when the message contains embedded
+    // attachments ([DELTA_PDF:], [DELTA_IMAGE:], [DELTA_DOCX:]).
+    // The base64 payload of a PDF/image/docx is a long ASCII blob that
+    // statistically contains substrings like "stop", "pause", "mute" —
+    // which would falsely match the media STOP regex and return
+    // "تمام، اتقفل 🔇" instead of processing the attachment.
+    // (This mirrors the hasEmbeddedAttachments guard used for MCP + Smart Ball.)
+    if (!hasEmbeddedAttachments) {
+     try {
       const { detectMediaIntentLLM, detectMediaIntentRegex } = await import('@/lib/ai-tools/media-intent-llm');
 
       // Try LLM-based detection first (context-aware)
@@ -401,6 +410,7 @@ export async function POST(request: NextRequest) {
     } catch (mediaError) {
       console.warn('[Chat] Media detection failed:', mediaError);
     }
+    } // end if (!hasEmbeddedAttachments)
 
     // ── HuggingFace Chat Model Bridge ──
     let modelConfig = getModelById(model);
