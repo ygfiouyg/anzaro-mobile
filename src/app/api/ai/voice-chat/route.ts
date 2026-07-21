@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { transcribeAudio } from '@/lib/hf-asr.service';
-import { generateMMSAudio, generateMMSAudioAuto, VOICES } from '@/lib/hf-tts.service';
+import { generateSpeech } from '@/lib/tts-unified';
 import { getZAIClient } from '@/lib/chat-utils';
 import { streamChatCompletion } from '@/lib/pollinations';
 import { extractBearerToken, getUserFromToken } from '@/lib/auth';
@@ -144,31 +144,37 @@ export async function POST(request: NextRequest) {
 
     console.log(`[VoiceChat] Chat result: "${responseText.slice(0, 80)}" (${chatTime}ms, provider: ${chatProvider})`);
 
-    // ── Step 3: TTS (Response → Audio) — respect voiceId choice ──────
-    // Voice selection flow: voiceId → VOICES lookup → language → MMS model
-    //   'hf-mms-shakir' → arz → facebook/mms-tts-arz (Egyptian)
-    //   'hf-mms-fusha'  → ara → facebook/mms-tts-ara  (MSA/Fusha)
-    //   unknown/default  → auto-detect from text content (defaults to MSA)
-    const selectedVoiceForLog = VOICES.find(v => v.id === voiceId);
-    console.log(`[VoiceChat] Step 3: TTS with voice=${voiceId} → language=${selectedVoiceForLog?.language || 'auto-detect'} (${selectedVoiceForLog?.nameAr || 'تلقائي'})`);
+    // ── Step 3: TTS (Response → Audio) — Unified facade with Edge TTS priority ──
+    // V.34 FIX: Use the unified TTS facade instead of calling HF MMS directly.
+    // The unified facade tries Edge TTS FIRST (ar-EG-ShakirNeural) which is a
+    // high-quality Microsoft neural voice that properly pronounces Egyptian Arabic.
+    // HF MMS (facebook/mms-tts-arz) quality is poor — it sounds robotic and
+    // often mispronounces Egyptian dialect words as Fusha.
+    //
+    // Fallback chain: Edge TTS → Google TTS → Gradio TTS → HF TTS
+    console.log(`[VoiceChat] Step 3: TTS via unified facade (Edge TTS priority for Egyptian Arabic)`);
     const ttsStartTime = Date.now();
 
     let audioBufferResult: Buffer;
+    let audioFormat: string;
     let ttsProvider = '';
     let duration = 0;
 
     try {
-      // Pass voiceId to generateMMSAudioAuto so it respects user's voice selection
-      audioBufferResult = await generateMMSAudioAuto(responseText, voiceId);
-      ttsProvider = 'hf-mms';
+      const ttsResult = await generateSpeech({
+        text: responseText,
+        voice: voiceId || 'egyptian-male',
+        language: 'ar',
+        speed: 1.0,
+      });
 
-      // Determine which language model was used based on voiceId
-      const selectedVoice = VOICES.find(v => v.id === voiceId);
-      const usedLangLabel = selectedVoice ? selectedVoice.nameAr : 'تلقائي';
+      audioBufferResult = ttsResult.audioBuffer;
+      audioFormat = ttsResult.format;
+      ttsProvider = ttsResult.provider;
 
       // Estimate duration: ~150 chars/sec for Arabic TTS
       duration = Math.ceil(responseText.length / 150);
-      console.log(`[VoiceChat] TTS voice: ${usedLangLabel} (${voiceId})`);
+      console.log(`[VoiceChat] TTS done via ${ttsProvider} (${(audioBufferResult.length / 1024).toFixed(1)}KB, format=${audioFormat})`);
     } catch (ttsError) {
       console.error('[VoiceChat] TTS failed:', ttsError instanceof Error ? ttsError.message : String(ttsError));
       // Return text-only response if TTS fails
@@ -188,13 +194,14 @@ export async function POST(request: NextRequest) {
     const ttsTime = Date.now() - ttsStartTime;
     console.log(`[VoiceChat] TTS done: ${duration}s, ${(audioBufferResult.length / 1024).toFixed(1)}KB (${ttsTime}ms)`);
 
-    // Return audio as base64 in JSON
+    // Return audio as base64 in JSON (use correct format from provider)
     const audioBase64 = audioBufferResult.toString('base64');
+    const mimeType = audioFormat === 'audio/mpeg' ? 'audio/mpeg' : 'audio/wav';
 
     return NextResponse.json({
       text: transcribedText,
       response: responseText,
-      audio: `data:audio/wav;base64,${audioBase64}`,
+      audio: `data:${mimeType};base64,${audioBase64}`,
       duration,
       asrProvider,
       ttsProvider,

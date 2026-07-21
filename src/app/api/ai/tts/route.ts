@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken, getUserFromToken } from '@/lib/auth';
 import { GROQ_API_KEY } from '@/lib/groq';
 import { generateMMSAudio, MMSLanguage, VOICES } from '@/lib/hf-tts.service';
+import { synthesizeSpeech as edgeSynthesize, EGYPTIAN_VOICES as EDGE_EGYPTIAN_VOICES } from '@/lib/edge-tts';
 import { traceAPI, traceError } from '@/lib/trace-logger';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 
 // ═══════════════════════════════════════════════════════════════════════
-// Anzaro AI TTS — HF MMS TTS → Groq PlayAI → Google Translate → ZAI SDK fallback chain
+// Anzaro AI TTS — Edge TTS → HF MMS → Groq PlayAI → Google Translate → ZAI SDK
 // ═══════════════════════════════════════════════════════════════════════
-// Route 1: HF MMS TTS (facebook/mms-tts-arz for Egyptian, mms-tts-ara for fusha)
-//   - Native Arabic TTS from Meta's MMS model
-//   - Works on HuggingFace Spaces infrastructure
-//   - May be slow on cold start (wait_for_model: true)
+// V.34: Edge TTS is now FIRST for Arabic — ar-EG-ShakirNeural is a high-quality
+// Microsoft neural voice that properly pronounces Egyptian Arabic dialect.
+// HF MMS (facebook/mms-tts-arz) quality is poor and sounds robotic.
+//
+// Route 0: Edge TTS (ar-EG-ShakirNeural) — BEST quality Egyptian Arabic, FREE
+// Route 1: HF MMS TTS (facebook/mms-tts-arz) — fallback if Edge fails
 // Route 2: Groq PlayAI TTS (~300ms, but IP-blocked in some regions)
 // Route 2.5: Google Translate TTS (FREE, no API key, works everywhere!)
 // Route 3: ZAI SDK TTS (reliable fallback, ~2s)
@@ -114,6 +117,47 @@ export async function POST(request: NextRequest) {
     }
 
     const isArabic = isArabicText(text);
+
+    // ── ROUTE 0: Edge TTS (BEST quality Egyptian Arabic) ─────────────
+    // V.34: Edge TTS ar-EG-ShakirNeural is a Microsoft neural voice that:
+    //   - Properly pronounces Egyptian Arabic dialect (not Fusha)
+    //   - Is high quality (natural sounding, not robotic)
+    //   - Is FREE (uses Microsoft Edge's TTS service via WebSocket)
+    //   - Works on HuggingFace Spaces
+    // This should be the FIRST choice for Arabic text.
+    if (isArabic) {
+      try {
+        // Map voice to Edge TTS voice
+        let edgeVoice = EDGE_EGYPTIAN_VOICES.male; // default: Shakir (Egyptian male)
+        if (voice.includes('female') || voice.includes('Salma') || voice === 'Aisha') {
+          edgeVoice = EDGE_EGYPTIAN_VOICES.female; // Salma (Egyptian female)
+        }
+
+        const edgeBuffer = await edgeSynthesize({
+          text: text.slice(0, 10000),
+          voice: edgeVoice,
+          rate: speed > 1.0 ? `+${Math.round((speed - 1) * 100)}%` : speed < 1.0 ? `-${Math.round((1 - speed) * 100)}%` : '+0%',
+          outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+        });
+
+        if (edgeBuffer.length > 100) {
+          traceAPI(`TTS: Edge TTS نجح (${edgeBuffer.length} bytes, voice=${edgeVoice})`);
+          return new Response(new Uint8Array(edgeBuffer), {
+            headers: {
+              'Content-Type': 'audio/mpeg',
+              'Content-Length': String(edgeBuffer.length),
+              'Cache-Control': 'no-cache',
+              'X-TTS-Provider': 'edge',
+              'X-Voice-Used': `edge:${edgeVoice}`,
+            },
+          });
+        }
+      } catch (edgeErr) {
+        const errMsg = edgeErr instanceof Error ? edgeErr.message : String(edgeErr);
+        console.warn(`[TTS] Edge TTS failed, falling back to HF MMS: ${errMsg.slice(0, 150)}`);
+        traceError(`TTS: Edge TTS فشل - ${errMsg.slice(0, 80)}`);
+      }
+    }
 
     // ── ROUTE 1: HF MMS TTS (Native Arabic TTS from Meta MMS) ──────
     // Only try HF MMS for Arabic text (it doesn't support English)
