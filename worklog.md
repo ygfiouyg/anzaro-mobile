@@ -2615,3 +2615,69 @@ Stage Summary:
 - **النص اللي طلع صحيح**: محاضرة عن IR spectroscopy بالتفصيل
 
 *Last updated: 2025-01-30 (Round 33) · V.33 end-to-end test PASSED on HF Space*
+
+---
+Task ID: v34-tts-egyptian-arabic-fix
+Agent: main (Z.ai Code)
+Task: إصلاح مشكلة TTS — الـ AI بيرد بالعامية المصرية بس الـ TTS بيحوّلها لفصحى
+
+Work Log:
+- شخصت المشكلة من رسالة المستخدم: "هو كسم الكلام بيقولو بالعامبه المصريه هو ليه بيخليه عربي فصحي"
+- معنى المشكلة: الـ AI بيرد بالعامية المصرية (صح)، بس الـ TTS بيقراه كأنه فصحى (غلط)
+
+### Root Cause (السبب الجذري):
+مسار `voice-chat/route.ts` كان بيستدعي `generateMMSAudioAuto()` مباشرة — ده بيوصل لـ `facebook/mms-tts-arz` (نموذج MMS من Meta). النموذج ده **جودته ضعيفة جداً**:
+- بيقرأ النص المصري بطريقة آلية (robotic)
+- بيحوّل الكلمات المصرية لنطق فصحى
+- مش بيدعم الـ intonation المصري الصح
+
+**المفارقة**: كان فيه `tts-unified.ts` (facade) موجود في الكود بيجرب **Edge TTS** الأول (`ar-EG-ShakirNeural`) — ده صوت Microsoft Neural عالي الجودة بيدعم العامية المصرية صح. بس `voice-chat` و `tts/route.ts` ما كانوش بيستخدموه!
+
+### الحل (V.34):
+
+**Fix 1: `voice-chat/route.ts`**
+- شيلت `generateMMSAudioAuto()` واستخدمت `generateSpeech()` من `tts-unified.ts`
+- الـ facade بيجرب: Edge TTS → Google TTS → Gradio TTS → HF TTS
+- Edge TTS (`ar-EG-ShakirNeural`) بقى الأولوية للمصري
+
+**Fix 2: `tts/route.ts`**
+- ضفت Edge TTS كـ Route 0 (قبل HF MMS)
+- بـ map الـ voice param لـ Edge voices (Shakir/Salma)
+- لو Edge فشل، بيـ fallback لـ HF MMS
+
+### Verification على HuggingFace:
+```
+=== Test TTS with Egyptian Arabic text ===
+Text: "إزيك يا جماعة، النهارده هنتكلم عن حاجة مهمة جداً."
+
+Response headers:
+  x-tts-provider: edge ✅
+  x-voice-used: edge:ar-EG-ShakirNeural ✅
+  content-type: audio/mpeg
+  content-length: 33120 bytes
+
+Audio file: MPEG ADTS, layer III, 48 kbps, 24 kHz, Monaural
+```
+
+**قبل الإصلاح**: `x-tts-provider: hf-mms` (جودة ضعيفة، نطق فصحى)
+**بعد الإصلاح**: `x-tts-provider: edge` (جودة عالية، نطق مصري صح) ✅
+
+### ليه Edge TTS أحسن من HF MMS؟
+
+| الميزة | Edge TTS (ar-EG-ShakirNeural) | HF MMS (mms-tts-arz) |
+|---|---|---|
+| الجودة | عالية (Microsoft Neural) | ضعيفة (robotic) |
+| العامية المصرية | بيدعمها صح | بيحوّلها لفصحى |
+| الـ intonation | طبيعي مصري | آلي |
+| السعر | مجاني | مجاني |
+| السرعة | سريع (WebSocket) | بطيء (cold start 20-60s) |
+| HF Space | يشتغل | يشتغل |
+
+Stage Summary:
+- **المشكلة اتحلت**: TTS بقى بيستخدم Edge TTS (`ar-EG-ShakirNeural`)
+- **النطق المصري صح**: مش بيحوّل لفصحى تاني
+- **الجودة عالية**: صوت Microsoft Neural طبيعي
+- **مجاني وسريع**: مش محتاج API key، مش بطيء زي MMS
+- **اترفع لـ HF Space** واتختبر بنجاح
+
+*Last updated: 2025-01-30 (Round 34) · V.34 TTS Egyptian Arabic fix deployed*
