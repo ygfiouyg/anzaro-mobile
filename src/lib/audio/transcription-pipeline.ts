@@ -25,6 +25,56 @@ export function estimateDuration(fileSize: number, mimeType: string): number {
 }
 
 /**
+ * V.36: Clean up common transcription artifacts.
+ *
+ * Removes:
+ *   - Channel/translator watermarks (e.g., "ترجمة نانسي قنقر" — appeared
+ *     repeatedly in the user's chemistry lecture transcript)
+ *   - Repeated "موسيقى" tags (keep only on the first segment)
+ *   - Common Whisper hallucinations ("شكراً للمشاهدة", "اشترك في القناة")
+ *   - Excessive whitespace
+ *
+ * @param text Raw transcription text from Whisper
+ * @param isFirstSegment Whether this is the first segment (controls "موسيقى" removal)
+ * @returns Cleaned text
+ */
+function cleanTranscriptionArtifacts(text: string, isFirstSegment: boolean): string {
+  if (!text) return '';
+
+  let cleaned = text;
+
+  // Remove known channel watermarks/signatures (Arabic)
+  const watermarks = [
+    /ترجمة\s+نانسي\s+قنقر/gi,
+    /ترجمة\s+نانسي/gi,
+    /نانسي\s+قنقر/gi,
+    /اشترك\s+في\s+القناة/gi,
+    /Subscribe\s+to\s+(my\s+)?channel/gi,
+    /شكراً?\s+للمشاهدة/gi,
+    /Thanks\s+for\s+watching/gi,
+    /لا\s+تنسى?\s+الاشتراك/gi,
+    /فعل\s+جرس\s+التنبيه/gi,
+  ];
+  for (const w of watermarks) {
+    cleaned = cleaned.replace(w, '');
+  }
+
+  // On segments after the first, remove "موسيقى" / "music" tags
+  // (they're usually intro/outro music markers and shouldn't repeat)
+  if (!isFirstSegment) {
+    cleaned = cleaned.replace(/\bموسيقى\b/gi, '');
+    cleaned = cleaned.replace(/\[music\]/gi, '');
+    cleaned = cleaned.replace(/\[موسيقى\]/gi, '');
+  }
+
+  // Collapse multiple spaces
+  cleaned = cleaned.replace(/\s{2,}/g, ' ');
+
+  // Trim
+  return cleaned.trim();
+}
+
+/**
  * Run ffmpeg to split the audio into 60-second 16kHz mono WAV segments.
  * Returns metadata (file paths + timing) WITHOUT reading the audio buffers
  * into memory — buffers are read lazily one-at-a-time during transcription.
@@ -72,10 +122,29 @@ async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?
   formData.append('response_format', 'json');
   formData.append('temperature', '0.0'); // V.31: Prevent hallucination
 
-  // V.35: Egyptian Arabic prompt — tells Whisper "this audio is Egyptian dialect,
-  // output Egyptian Arabic, NOT Modern Standard Arabic"
-  // The prompt should be in the same language/style as the expected output.
-  const egyptianPrompt = prompt || 'الصوت ده بالعامية المصرية. اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى. يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن"، و"بيقول" مش "يقول"، و"عملنا" مش "قمنا بعمل".';
+  // V.36: Enhanced Egyptian Arabic prompt — 3 improvements over V.35:
+  //
+  // 1. Egyptian dialect preservation (V.35): Don't normalize to Fusha
+  // 2. Technical terms preservation (V.36 NEW): Keep English scientific terms
+  //    as-is. Whisper tends to "arabize" English words (e.g., "fingerprint" →
+  //    "فنجر برين", "double bond" → "دابل بوند"). Tell it to keep them in
+  //    English within the Arabic text.
+  // 3. Chemistry/science context (V.36 NEW): Mention that this may be a
+  //    chemistry/science lecture, so Whisper expects terms like "IR",
+  //    "absorption", "frequency", "functional group", etc.
+  //
+  // The prompt is passed as-is to Whisper and acts as a "prefix" that guides
+  // the model's decoding. It should be in the same script/language as the
+  // expected output (Arabic with English technical terms).
+  const egyptianPrompt = prompt || [
+    'ده تفريغ صوتي لمحاضرة بالعامية المصرية.',
+    'اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى.',
+    'يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن"، و"بيقول" مش "يقول"، و"عملنا" مش "قمنا بعمل".',
+    'المصطلحات العلمية والإنجليزية اكتبها بالإنجليزي زي ما هي، متحاولش تعرّبها.',
+    'يعني اكتب: IR, fingerprint, functional group, double bond, absorption, frequency, peak, ester, ketone, aldehyde, acid, amide, anhydride, example, hydrogen bond, vibration, conjugation, characteristic, spectrum, overtone.',
+    'الأرقام والرموز الكيميائية زي C=O, CH3, CH2, R-COOH, R-CO-R, O-H, C-H اكتبها زي ما هي.',
+    'لو سمعت كلمة إنجليزي وسط الكلام العربي، اكتبها بالإنجليزي.',
+  ].join(' ');
 
   formData.append('prompt', egyptianPrompt);
 
@@ -204,8 +273,14 @@ export async function transcribeAudioFile(
       const r = await transcribeSegment(segBuffer, lang, useHF);
       if (r.provider === 'hf') { useHF = true; provider = 'hf'; }
 
-      results.push({ index: i, startTime: seg.startTime, endTime: seg.endTime, text: r.text });
-      fullText += r.text + ' ';
+      // V.36: Clean up common transcription artifacts:
+      //   - Channel watermarks/signatures (e.g., "ترجمة نانسي قنقر")
+      //   - Repeated "موسيقى" tags (keep only the first one)
+      //   - Leading/trailing whitespace
+      const cleanedText = cleanTranscriptionArtifacts(r.text, i === 0);
+
+      results.push({ index: i, startTime: seg.startTime, endTime: seg.endTime, text: cleanedText });
+      fullText += cleanedText + ' ';
 
       // V.33: Save PARTIAL transcript to DB after each segment
       // (prevents data loss if the process crashes or times out)
