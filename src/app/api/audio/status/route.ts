@@ -37,12 +37,17 @@ export async function GET(request: NextRequest) {
       };
 
       // V.33: Return transcript when completed OR when failed with partial work.
-      // This lets the frontend recover partial transcripts even if the process
-      // endpoint was killed by HF proxy timeout.
-      if ((record.status === 'completed' || record.status === 'failed') && record.transcript) {
+      // V.36c: Only auto-delete 'completed' records. 'failed' records are kept
+      // so they can be resumed (the process endpoint can continue from the last
+      // completed segment). The frontend polls status to get partial transcripts,
+      // and only the final 'completed' record is deleted after delivery.
+      if (record.status === 'completed' && record.transcript) {
         response.transcript = record.transcript;
         // Auto-delete after delivery (privacy — audio/transcript not stored permanently)
         await db.audioRecord.delete({ where: { id: record.id } }).catch(() => {});
+      } else if (record.status === 'failed' && record.transcript) {
+        // Return partial transcript but DON'T delete — allow resume
+        response.transcript = record.transcript;
       }
 
       return NextResponse.json(response);
