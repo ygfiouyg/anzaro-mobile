@@ -2375,3 +2375,81 @@ Work Log:
 الـ user request ("توكل على الله واعمل التعديل ده، والسيستم هيظبط معاك 100%!") — **تم التنفيذ بنجاح** في V.32.
 
 *Last updated: 2025-01-30 (Round 30) · V.32 Architecture Verified*
+
+---
+Task ID: pdf-stop-bugfix
+Agent: main (Z.ai Code)
+Task: إصلاح bug: لما المستخدم يبعت PDF لعبس ويقول "اعمل ملخص..." بيرد "تمام اتقفل" (رد إيقاف الراديو)
+
+Work Log:
+- شخصت المشكلة من رسالة المستخدم: لما يبعت PDF + "اعمل ملخص لاهم النفاط..." → الـ AI بيرد "تمام، اتقفل 🔇"
+- بحثت عن مصدر الرد "تمام اتقفل" ولقيته في 3 أماكن:
+  1. `src/app/api/chat/stream/route.ts:357` — SSE response لـ media STOP intent
+  2. `src/lib/chat/capabilities-prompt.ts:214` — system prompt instruction
+  3. `src/lib/chat/system-prompt-builder.ts:166` — system prompt instruction
+- ركزت على المصدر #1 لأن ده اللي بيرجع الرد فعلياً (قبل ما الـ LLM يشتغل أصلاً)
+
+### Root Cause (السبب الجذري):
+لما المستخدم يبعت PDF، الـ frontend بيضم base64 data بتاع الـ PDF جوه الـ message string:
+```
+اعمل ملخص لاهم النفاط...\n\n[DELTA_PDF:exam.pdf:JVBERi0xLjQK...]
+```
+
+الـ base64 blob حجمه 500KB-5MB من ASCII characters عشوائية. الإحصائياً، أي 1MB base64 بتحتوي على:
+- "stop" ≈ 2 occurrences
+- "mute" ≈ 1 occurrence
+- "pause" ≈ 0-1 occurrences
+
+الـ STOP regex القديم في `media-intent-llm.ts` كان:
+```js
+/اقفل|...|stop|pause|mute|.../i  // NO word boundaries!
+```
+ده كان بـ match على "stop" جوه base64 → بيرجع `{action: 'stop'}` → بيرجع "تمام، اتقفل 🔇"
+
+### الفجوة في الـ Architecture:
+الـ MCP detector و Smart Ball detector كان فيهم guard:
+```js
+if (!hasEmbeddedAttachments) { ... }  // lines 212, 239
+```
+لكن **الـ Media Intent Detection block (line 336) كان ناقصه نفس الـ guard!**
+
+### Fix 1: `src/app/api/chat/stream/route.ts`
+لفت الـ Media Intent Detection block كله في `if (!hasEmbeddedAttachments)` — consistent مع MCP + Smart Ball guards.
+
+### Fix 2: `src/lib/ai-tools/media-intent-llm.ts`
+hardened الـ STOP regex بـ word boundaries:
+```js
+// OLD (buggy - no \b):
+/...|stop|pause|mute|.../i
+
+// NEW (fixed - \b prevents matching inside base64):
+const hasArabicStop = /(?:اقفل|...)/i.test(message);  // Arabic safe (base64 is ASCII)
+const hasEnglishStop = /(?:\bstop\b|\bpause\b|\bmute\b|...)/i.test(message);
+```
+
+### Verification:
+```
+=== Bug Reproduction Test ===
+User message: اعمل ملخص لاهم النفاط اللتي لا يخلو منها امتحان ف الجزء دا
+PDF base64 size: 0.95 MB
+STOP intent detected? NO ✅ (FIXED)
+
+=== Regression Test (real stop commands) ===
+"اقفل الراديو"            STOP ✓
+"stop the music"          STOP ✓
+"وقف الصوت"               STOP ✓
+"please stop"             STOP ✓
+"mute"                    STOP ✓
+```
+
+- ✅ lint: 0 errors
+- ✅ Page loads: HTTP 200, title "Anzaro AI — ذكاء اصطناعي عربي"
+- ✅ Commit: 2f68d0e
+
+Stage Summary:
+- **الـ bug اتحل**: PDF attachment مش هيقلب الإيقاف تاني
+- **الـ fix متنفذ على مستويين**: guard + hardened regex (defense in depth)
+- **مفيش regression**: أوامر الإيقاف الحقيقية لسه شغالة
+- **جاهز للـ push لـ HuggingFace**
+
+*Last updated: 2025-01-30 (Round 31) · PDF→STOP bugfix committed*
