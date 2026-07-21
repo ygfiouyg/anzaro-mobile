@@ -107,13 +107,15 @@ export function splitAudioWithFfmpeg(inputBuffer: Buffer, inputExt: string, work
   return segments;
 }
 
-async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?: string): Promise<{ text: string; rateLimited: boolean }> {
+async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?: string, onRetryWait?: (msg: string) => void): Promise<{ text: string; rateLimited: boolean }> {
   const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
   if (!GROQ_API_KEY) return { text: '', rateLimited: false };
 
-  // V.36: Shortened prompt — the V.36 long prompt was causing issues.
-  // Keep it concise but effective. Whisper prompt limit is ~224 tokens.
-  const egyptianPrompt = prompt || 'ده محاضرة بالعامية المصرية. اكتب زي ما بيتقال بالظبط بالعامية، متحولش لفصحى. المصطلحات العلمية والإنجليزي اكتبها بالإنجليزي زي IR, fingerprint, double bond, ester, ketone, acid, peak, frequency, absorption.';
+  // V.36c: Reverted to V.35's simple Egyptian prompt.
+  // The V.36 long/technical-terms prompt leaked into the transcript output
+  // (Whisper included prompt text like "المحاضرة بالعامية المصرية" in the result).
+  // This simple prompt works well (produced 20,832 chars in V.35 test).
+  const egyptianPrompt = prompt || 'الصوت ده بالعامية المصرية. اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى. يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن".';
 
   async function attemptGroq(): Promise<{ text: string; rateLimited: boolean; status: number }> {
     const formData = new FormData();
@@ -139,20 +141,24 @@ async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?
     return { text: '', rateLimited: false, status: response.status };
   }
 
-  // V.36: First attempt
+  // First attempt
   const result1 = await attemptGroq();
   if (result1.text) return { text: result1.text, rateLimited: false };
 
-  // V.36: If rate-limited (429), wait 60s and retry ONCE
-  // (Groq rate limits reset quickly — better to wait than fall back to HF
-  // which often returns empty when the model is cold)
+  // If rate-limited (429), wait 30s and retry ONCE.
+  // Send heartbeat during the wait so the SSE proxy doesn't kill the connection.
   if (result1.rateLimited) {
-    console.error('[Groq] Rate limited (429). Waiting 60s and retrying...');
-    await new Promise(r => setTimeout(r, 60_000));
+    onRetryWait?.('[Groq] Rate limited (429). Waiting 30s and retrying...');
+    console.error('[Groq] Rate limited (429). Waiting 30s and retrying...');
+    // Send heartbeats every 5s during the 30s wait to keep SSE alive
+    for (let w = 0; w < 6; w++) {
+      await new Promise(r => setTimeout(r, 5_000));
+      onRetryWait?.(`[Groq] Retry in ${30 - (w + 1) * 5}s...`);
+    }
     const result2 = await attemptGroq();
     if (result2.text) return { text: result2.text, rateLimited: false };
     if (result2.rateLimited) {
-      console.error('[Groq] Still rate limited after 60s wait. Falling back to HF.');
+      console.error('[Groq] Still rate limited after 30s wait. Falling back to HF.');
     }
     return { text: result2.text, rateLimited: result2.rateLimited };
   }
@@ -192,18 +198,18 @@ async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<
   return '';
 }
 
-async function transcribeSegment(audioBuffer: Buffer, language: string, useHF: boolean): Promise<{ text: string; provider: 'groq' | 'hf' }> {
+async function transcribeSegment(audioBuffer: Buffer, language: string, useHF: boolean, onRetryWait?: (msg: string) => void): Promise<{ text: string; provider: 'groq' | 'hf' }> {
   if (useHF) {
     console.error('[Transcribe] Using HF (Groq was rate limited)');
     return { text: await transcribeWithHF(audioBuffer, language), provider: 'hf' };
   }
 
   console.error('[Transcribe] Trying Groq...');
-  const groqResult = await transcribeWithGroq(audioBuffer, language);
+  const groqResult = await transcribeWithGroq(audioBuffer, language, undefined, onRetryWait);
   if (groqResult.text) return { text: groqResult.text, provider: 'groq' };
 
   if (groqResult.rateLimited) {
-    console.error('[Transcribe] Groq 429 — falling back to HF...');
+    console.error('[Transcribe] Groq 429 after retry — falling back to HF...');
     return { text: await transcribeWithHF(audioBuffer, language), provider: 'hf' };
   }
 
@@ -227,7 +233,8 @@ export async function transcribeAudioFile(
   mimeType: string,
   recordId: string,
   onProgress?: (current: number, total: number, segmentText: string, fullTextSoFar: string) => void,
-  startSegment: number = 0
+  startSegment: number = 0,
+  onHeartbeat?: (msg: string) => void
 ): Promise<TranscriptionResult> {
   const ext = mimeType.split('/')[1] || 'm4a';
   const workDir = join(tmpdir(), `anzaro-${recordId}`);
@@ -267,7 +274,7 @@ export async function transcribeAudioFile(
       // LAZY READ: load this segment's buffer just-in-time
       const segBuffer = readFileSync(seg.filePath);
 
-      const r = await transcribeSegment(segBuffer, lang, useHF);
+      const r = await transcribeSegment(segBuffer, lang, useHF, onHeartbeat);
       if (r.provider === 'hf') { useHF = true; provider = 'hf'; }
 
       // V.36: Clean up common transcription artifacts:

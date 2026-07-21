@@ -113,7 +113,12 @@ export async function POST(request: NextRequest) {
               fullLength: fullTextSoFar.length,
             })));
           },
-          startSegment
+          startSegment,
+          // V.36c: Heartbeat callback — sends SSE events during Groq 429 retry
+          // to keep the connection alive (HF proxy kills idle connections after ~10s)
+          (msg) => {
+            controller.enqueue(encoder.encode(sse({ type: 'heartbeat', msg })));
+          }
         );
 
         // Save final transcript to DB
