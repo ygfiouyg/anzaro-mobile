@@ -111,55 +111,52 @@ async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?
   const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
   if (!GROQ_API_KEY) return { text: '', rateLimited: false };
 
-  const formData = new FormData();
-  formData.append('file', new Blob([audioBuffer], { type: 'audio/wav' }), 'segment.wav');
-  formData.append('model', 'whisper-large-v3');
-  // V.35: Keep language='ar' for accuracy, but use the `prompt` parameter to
-  // guide Whisper to output Egyptian Arabic dialect instead of MSA (Fusha).
-  // Without a prompt, Whisper normalizes Egyptian dialect words to their MSA
-  // equivalents (e.g., "إزيك" → "كيف حالك", "النهارده" → "اليوم").
-  formData.append('language', language);
-  formData.append('response_format', 'json');
-  formData.append('temperature', '0.0'); // V.31: Prevent hallucination
+  // V.36: Shortened prompt — the V.36 long prompt was causing issues.
+  // Keep it concise but effective. Whisper prompt limit is ~224 tokens.
+  const egyptianPrompt = prompt || 'ده محاضرة بالعامية المصرية. اكتب زي ما بيتقال بالظبط بالعامية، متحولش لفصحى. المصطلحات العلمية والإنجليزي اكتبها بالإنجليزي زي IR, fingerprint, double bond, ester, ketone, acid, peak, frequency, absorption.';
 
-  // V.36: Enhanced Egyptian Arabic prompt — 3 improvements over V.35:
-  //
-  // 1. Egyptian dialect preservation (V.35): Don't normalize to Fusha
-  // 2. Technical terms preservation (V.36 NEW): Keep English scientific terms
-  //    as-is. Whisper tends to "arabize" English words (e.g., "fingerprint" →
-  //    "فنجر برين", "double bond" → "دابل بوند"). Tell it to keep them in
-  //    English within the Arabic text.
-  // 3. Chemistry/science context (V.36 NEW): Mention that this may be a
-  //    chemistry/science lecture, so Whisper expects terms like "IR",
-  //    "absorption", "frequency", "functional group", etc.
-  //
-  // The prompt is passed as-is to Whisper and acts as a "prefix" that guides
-  // the model's decoding. It should be in the same script/language as the
-  // expected output (Arabic with English technical terms).
-  const egyptianPrompt = prompt || [
-    'ده تفريغ صوتي لمحاضرة بالعامية المصرية.',
-    'اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى.',
-    'يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن"، و"بيقول" مش "يقول"، و"عملنا" مش "قمنا بعمل".',
-    'المصطلحات العلمية والإنجليزية اكتبها بالإنجليزي زي ما هي، متحاولش تعرّبها.',
-    'يعني اكتب: IR, fingerprint, functional group, double bond, absorption, frequency, peak, ester, ketone, aldehyde, acid, amide, anhydride, example, hydrogen bond, vibration, conjugation, characteristic, spectrum, overtone.',
-    'الأرقام والرموز الكيميائية زي C=O, CH3, CH2, R-COOH, R-CO-R, O-H, C-H اكتبها زي ما هي.',
-    'لو سمعت كلمة إنجليزي وسط الكلام العربي، اكتبها بالإنجليزي.',
-  ].join(' ');
+  async function attemptGroq(): Promise<{ text: string; rateLimited: boolean; status: number }> {
+    const formData = new FormData();
+    formData.append('file', new Blob([audioBuffer], { type: 'audio/wav' }), 'segment.wav');
+    formData.append('model', 'whisper-large-v3');
+    formData.append('language', language);
+    formData.append('response_format', 'json');
+    formData.append('temperature', '0.0');
+    formData.append('prompt', egyptianPrompt);
 
-  formData.append('prompt', egyptianPrompt);
+    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST', headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: formData, signal: AbortSignal.timeout(120_000),
+    });
 
-  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST', headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: formData, signal: AbortSignal.timeout(120_000),
-  });
+    if (response.ok) {
+      const data = await response.json();
+      return { text: data.text || '', rateLimited: false, status: 200 };
+    }
 
-  if (response.ok) {
-    const data = await response.json();
-    return { text: data.text || '', rateLimited: false };
+    const errText = await response.text().catch(() => '');
+    console.error(`[Groq] ${response.status}: ${errText.slice(0, 200)}`);
+    if (response.status === 429) return { text: '', rateLimited: true, status: 429 };
+    return { text: '', rateLimited: false, status: response.status };
   }
 
-  const errText = await response.text().catch(() => '');
-  console.error(`[Groq] ${response.status}: ${errText.slice(0, 200)}`);
-  if (response.status === 429) return { text: '', rateLimited: true };
+  // V.36: First attempt
+  const result1 = await attemptGroq();
+  if (result1.text) return { text: result1.text, rateLimited: false };
+
+  // V.36: If rate-limited (429), wait 60s and retry ONCE
+  // (Groq rate limits reset quickly — better to wait than fall back to HF
+  // which often returns empty when the model is cold)
+  if (result1.rateLimited) {
+    console.error('[Groq] Rate limited (429). Waiting 60s and retrying...');
+    await new Promise(r => setTimeout(r, 60_000));
+    const result2 = await attemptGroq();
+    if (result2.text) return { text: result2.text, rateLimited: false };
+    if (result2.rateLimited) {
+      console.error('[Groq] Still rate limited after 60s wait. Falling back to HF.');
+    }
+    return { text: result2.text, rateLimited: result2.rateLimited };
+  }
+
   return { text: '', rateLimited: false };
 }
 
