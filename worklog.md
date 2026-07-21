@@ -2765,3 +2765,67 @@ Stage Summary:
 - **اترفع لـ HF Space** واتختبر بنجاح على ملف 44 دقيقة
 
 *Last updated: 2025-01-30 (Round 35) · V.35 Whisper Egyptian dialect preservation deployed*
+
+---
+Task ID: v36c-transcription-fixes
+Agent: main (Z.ai Code)
+Task: إصلاح مشاكل الـ transcript — prompt leak + SSE dying + resume
+
+Work Log:
+- اختبرت V.36 (prompt طويل + مصطلحات تقنية) واكتشفت مشكلتين:
+  1. الـ prompt طويل كان بيتسرب للـ transcript (Whisper بيكتب الـ prompt كأنه صوت)
+  2. الـ SSE stream كان بيموت أثناء Groq 429 retry (60s بدون heartbeat)
+
+### الإصلاحات (V.36c):
+
+**Fix 1: Reverted to V.35 simple prompt**
+- V.36 long prompt بيتسرب للـ transcript
+- رجعت لـ V.35 prompt البسيط اللي اشتغل كويس (20,832 chars)
+- حذفت قائمة المصطلحات التقنية (كانت بتسبب leaking)
+
+**Fix 2: SSE heartbeat during Groq retry**
+- المشكلة: 60s wait بدون heartbeat → HF proxy بيقتل الاتصال
+- الحل: بعت heartbeat كل 5s أثناء الـ 30s wait
+- قللت الـ wait من 60s لـ 30s
+
+**Fix 3: Resume logic for 'failed' status**
+- المشكلة: resume كان بيشتغل بس مع 'processing'، مش 'failed'
+- الحل: خليته يشتغل مع 'processing' OR 'failed'
+- دلوقتي لو الـ stream مات، نقدر نresume من آخر قطعة
+
+**Fix 4: Auto-delete only 'completed' records**
+- المشكلة: status endpoint كان بيمسح 'failed' records بعد تسليم partial transcript
+- ده كان بيمنع resume لأن الـ record بيبقى مش موجود
+- الحل: بس 'completed' records بتتمسح؛ 'failed' بتتفضل للـ resume
+
+### الاختبار النهائي على HF (ملف 44 دقيقة):
+
+استخدمت auto-resume loop (5 rounds):
+- Round 1: 5 → 24 segments (12,296 chars)
+- Round 2: 24 → 27 segments (13,497 chars)
+- Round 3: 27 → 43 segments (17,803 chars) ← Done event!
+
+**النتيجة النهائية:**
+- Transcript: 17,803 chars
+- Status: completed
+- Provider: groq (whisper-large-v3)
+- Dialect: Egyptian Arabic ✅ (مش فصحى)
+- Watermarks: معضمها اتشال (شوية لسه موجودة)
+
+### مقارنة النسخ:
+
+| الإصدار | الطول | المزود | اللهجة | مشاكل |
+|---|---|---|---|---|
+| V.33 (بدون prompt) | 13,600 chars | hf | فصحى ❌ | normalization |
+| V.35 (prompt مصري) | 20,832 chars | groq | مصري ✅ | شوية تحريف |
+| V.36 (prompt طويل) | 0 chars | hf | — ❌ | prompt leak + 0 chars |
+| V.36c (prompt بسيط + resume) | 17,803 chars | groq | مصري ✅ | شوية تحريف |
+
+Stage Summary:
+- **اللهجة المصرية محفوظة**: مش فصحى ✅
+- **الـ watermark cleanup شغال**: معضمها اتشالت ✅
+- **الـ resume شغال**: الـ stream بيموت بس نقدر نكمل ✅
+- **الـ prompt ما بيتسربش**: رجعت للـ prompt البسيط ✅
+- **فيه شوية تحريف لسه**: مصطلحات تقنية بتتعرب أحياناً (طبيعي في محاضرات علمية)
+
+*Last updated: 2025-01-30 (Round 36) · V.36c transcription fixes deployed*
