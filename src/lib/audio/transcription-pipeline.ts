@@ -57,16 +57,27 @@ export function splitAudioWithFfmpeg(inputBuffer: Buffer, inputExt: string, work
   return segments;
 }
 
-async function transcribeWithGroq(audioBuffer: Buffer, language: string): Promise<{ text: string; rateLimited: boolean }> {
+async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?: string): Promise<{ text: string; rateLimited: boolean }> {
   const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
   if (!GROQ_API_KEY) return { text: '', rateLimited: false };
 
   const formData = new FormData();
   formData.append('file', new Blob([audioBuffer], { type: 'audio/wav' }), 'segment.wav');
   formData.append('model', 'whisper-large-v3');
+  // V.35: Keep language='ar' for accuracy, but use the `prompt` parameter to
+  // guide Whisper to output Egyptian Arabic dialect instead of MSA (Fusha).
+  // Without a prompt, Whisper normalizes Egyptian dialect words to their MSA
+  // equivalents (e.g., "إزيك" → "كيف حالك", "النهارده" → "اليوم").
   formData.append('language', language);
   formData.append('response_format', 'json');
   formData.append('temperature', '0.0'); // V.31: Prevent hallucination
+
+  // V.35: Egyptian Arabic prompt — tells Whisper "this audio is Egyptian dialect,
+  // output Egyptian Arabic, NOT Modern Standard Arabic"
+  // The prompt should be in the same language/style as the expected output.
+  const egyptianPrompt = prompt || 'الصوت ده بالعامية المصرية. اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى. يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن"، و"بيقول" مش "يقول"، و"عملنا" مش "قمنا بعمل".';
+
+  formData.append('prompt', egyptianPrompt);
 
   const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST', headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: formData, signal: AbortSignal.timeout(120_000),
@@ -87,6 +98,11 @@ async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<
   const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
   if (!HF_TOKEN) return '';
 
+  // V.35: Use whisper-large-v3-turbo (faster) as primary, but we can't pass a
+  // prompt via the HF Inference API. The model will still tend to normalize
+  // Egyptian to MSA, but it's our fallback when Groq is rate-limited.
+  // TODO: If we need better Egyptian dialect support, use the OpenAI Whisper
+  // API directly (supports prompt) or fine-tune a model on Egyptian Arabic.
   const url = 'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo';
   const response = await fetch(url, {
     method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(120_000),
