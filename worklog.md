@@ -2829,3 +2829,77 @@ Stage Summary:
 - **فيه شوية تحريف لسه**: مصطلحات تقنية بتتعرب أحياناً (طبيعي في محاضرات علمية)
 
 *Last updated: 2025-01-30 (Round 36) · V.36c transcription fixes deployed*
+
+---
+Task ID: v37-pdf-summarization-fix
+Agent: main (Z.ai Code)
+Task: إصلاح مشكلة PDF summarization timeout — بيبعت PDF + يقول لخص فيقعد لحد timeout
+
+Work Log:
+- اختبرت على HF Space: بعت PDF (53 صفحة) + "لخص المحاضرة دي وقولي اهم النقاط..."
+- النتيجة: الـ request بيفضل قاعد لحد timeout بدون أي response
+
+### Root Cause 1: buildLLMMessages قبل بدء SSE stream
+في `stream/route.ts` line 854، `buildLLMMessages()` كان بيشتغل **قبل** ما الـ SSE stream يبدأ. الـ function دي بتـ run `extractPdfWithVlmAndText()` اللي بتاخد 40-90 ثانية لـ 53-page PDF. خلال الوقت ده:
+- مفيش HTTP response بدأت
+- مفيش bytes بتسري
+- HF proxy بيقتل الاتصال بعد ~10s idle → timeout
+
+**Fix**: Skip `buildLLMMessages` لما `hasEnhancedDocIntent` true (الـ Smart Doc pipeline بيعمل extraction بتاعه).
+
+### Root Cause 2: Arabic text normalization في intent classifier
+- النص: "لخص المحاضرة دي..." فيه ة (Ta Marbuta)
+- الـ regex patterns كان فيها "محاضرات?" (بـ ت مش ة)
+- ده خلى الـ patterns مش بتـ match → intent مش متكشف صح
+
+**Fix**: ضفت normalization step في `classifyDocIntent()`:
+- شيل tashkeel (diacritics)
+- normalize Alef variants (أإآ → ا)
+- normalize Alef Maksura → Ya (ى → ي)
+- normalize Ta Marbuta → Ha (ة → ه)
+
+### Root Cause 3: Quiz false-positive
+- Pattern `/امتحاني?\s*/i` كان بـ match "الامتحان" في "النقاط اللي لازم تيجي ف الامتحان"
+- ده خلى intent = 'quiz' (weight 4) بدل 'summarize' (weight 3)
+
+**Fix**: خليت quiz patterns أكثر تحديداً:
+- `/امتحاني?\s*/i` → `/(?:اعمل|جهز|حط|جب|هات|عطيني)\s*(?:لي)?\s*امتحان/i` (محتاج action verb)
+- `/امتحاني?\s*(بس|بعد كده| دلوقتي)/i` → `/امتحاني\s*(بس|بعد كده|دلوقتي)/i` (محتاج يا suffix)
+
+### Verification على HF:
+
+**قبل الإصلاح:**
+- timeout بعد 10 ثواني بدون أي response
+
+**بعد الإصلاح:**
+```
+Status: started
+Progress: 10% - جاري توليد المحتوى بالذكاء الاصطناعي...
+Progress: 30% - جاري صياغة المحتوى الأكاديمي...
+Progress: 50% - جاري تحليل التصميم واختيار الألوان...
+Progress: 80% - 🎨 الموديل بيفكّر ويصمّم ويبرمج المستند من الصفر...
+Progress: 95% - جاري إصدار الملف النهائي...
+Progress: 100% - تم إنشاء المستند بنجاح!
+
+PDF GENERATED:
+  success: true
+  fileUrl: /app/download/b78a14c1-...html
+  fileName: لخص_المحاضرة_دي_وقولي_اهم_النقاط...pdf
+  durationMs: 16312 (16 ثانية)
+  docType: pdf
+```
+
+- ✅ مش timeout
+- ✅ Smart Doc pipeline اشتغل (intent = summarize صح)
+- ✅ PDF اتولد في 16 ثانية
+- ✅ Progress events بتنبعث بشكل مستمر
+- ⚠️ الملف طلع HTML (محتاج تحويل لـ PDF فعلي)
+- ⚠️ Google Drive upload مش بيحصل تلقائياً
+
+Stage Summary:
+- **مشكلة الـ timeout اتحلت**: PDF summarization بيشتغل في 16 ثانية بدل timeout
+- **intent classifier اتصحح**: summarize بدل quiz
+- **Arabic normalization**: patterns بتـ match بشكل صح
+- **فيه مشاكل لسه**: HTML بدل PDF + Drive upload محتاج تفعيل
+
+*Last updated: 2025-01-30 (Round 37) · V.37 PDF summarization timeout fixed*
