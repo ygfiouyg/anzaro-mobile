@@ -2971,3 +2971,341 @@ Stage Summary:
 - ⚠️ **الاختبار من API**: استخدم format غلط، محتاج اختبار من UI الفعلي
 
 *Last updated: 2025-01-30 (Round 38) · V.38 PDF + Drive fix deployed*
+
+---
+
+Task ID: investigate-google-oauth
+Agent: explore (Z.ai Code)
+Task: RESEARCH ONLY — investigate Google OAuth + linking + Drive upload (3 issues). No code changes.
+
+Summary of Findings:
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 1: Google login not working
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/app/api/auth/google/route.ts            — initiates OAuth (GET /api/auth/google)
+- src/app/api/auth/google/callback/route.ts   — handles callback, upserts User + creates Session
+- src/components/anzaro/AuthScreen.tsx        — login screen with "Google" + "زائر سريع" buttons
+- src/app/api/auth/guest/route.ts             — POST endpoint that should create a throwaway guest account (BROKEN)
+- src/lib/auth.ts                             — exports generateToken / getUserFromToken / etc.
+
+Current code does:
+- handleGoogle() → /api/auth/google → redirects to accounts.google.com/o/oauth2/v2/auth with scope = "email profile" (no Drive scopes).
+- After Google responds, callback exchanges code → tokens → fetches userinfo → upserts User → creates Session via generateToken() + db.session.create() → sets anzaro_session httpOnly cookie → redirects to ${FRONTEND_URL}/?google_login=<token>&google_name=<name>.
+- handleGuest() → window.location.href = '/api/auth/google?guest=1' (BUG — see below).
+
+What's broken:
+1. GUEST BUTTON REDIRECTS TO GOOGLE LOGIN. handleGuest() in AuthScreen.tsx (line 142-145) navigates to '/api/auth/google?guest=1'. But /api/auth/google/route.ts does NOT read the ?guest=1 query parameter at all — every request is treated identically as a Google OAuth sign-in. So "زائر سريع" behaves exactly like the Google button.
+2. THE DEDICATED GUEST ENDPOINT IS BROKEN. /api/auth/guest/route.ts imports { createGuestUser, createSession, setSessionCookie } from '@/lib/auth'. None of these symbols exist in src/lib/auth.ts (verified: that file only exports getSessionDurationDays, invalidateSessionCache, invalidateAllUserSessionsCache, hashPassword, verifyPassword, isLegacyHash, generateToken, getUserFromToken, extractBearerToken, rotateSessionToken). So even if handleGuest pointed at /api/auth/guest, the route would crash at module-load (500). Compare to /api/auth/login/route.ts which builds the session inline with generateToken() + db.session.create() — no shared helper.
+3. HARDCODED REDIRECT-URI FALLBACK. Both /api/auth/google/route.ts and /api/auth/google/callback/route.ts fall back to 'https://kopabdo-delta-ai-v2.hf.space' if ANZARO_PUBLIC_URL / DELTAAI_PUBLIC_URL are unset. If those env vars are missing, the redirect_uri sent to Google will not match what's registered in Google Cloud Console → redirect_uri_mismatch error.
+4. LOGIN SESSION HAS NO DRIVE SCOPES. Even when this OAuth flow succeeds, scopes are just "email profile". The resulting session is a regular app session (anzaro_session cookie + User row); it stores NO Google access_token anywhere. So a user who logs in via this button has no linked Google account usable by MCP tools.
+5. TOKEN IN URL. The session token is passed in the redirect URL (?google_login=<token>). The httpOnly cookie is the reliable path, but the URL token can leak via Referer / browser history. The frontend auth-store.setGoogleSession() reads the URL token then calls /api/auth/me.
+
+What needs to be fixed:
+- handleGuest should POST to /api/auth/guest (or call a client helper that does the same) and use the returned token, NOT navigate to Google.
+- /api/auth/guest/route.ts must be rewritten to use the actual exports of @/lib/auth (generateToken + db.session.create + an httpOnly cookie setter, mirroring /api/auth/login/route.ts) and to actually create a throwaway User row (name="زائر", email=guest_<uuid>@anzaro.local, password=null, isVerified=true) before issuing the session.
+- Set ANZARO_PUBLIC_URL in env, OR document that this URL must match the Google Cloud Console authorized redirect URI.
+- Decide whether the "Google" button should also request Drive scopes (currently it does not). If yes, switch to the NextAuth Google provider (which already has the right scopes) or extend the custom route's scope list and persist the access_token.
+- Optionally stop putting the token in the URL and rely solely on the httpOnly cookie + a same-page /api/auth/me lookup.
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 2: Google account linking fails
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/components/chat/IntegrationDashboard.tsx  — UI shown in the "ربط Google Workspace" dialog (uses useSession / signIn / signOut from next-auth)
+- src/components/chat/ChatHeader.tsx            — opens the IntegrationDashboard dialog (lines 530, 696-699)
+- src/lib/auth-nextauth.ts                      — NextAuth config: Google provider with drive.readonly + drive.file + sheets + documents + tasks + calendar + contacts.readonly scopes, JWT strategy, refresh-token logic in jwt() callback
+- src/app/api/auth/[...nextauth]/route.ts       — NextAuth catch-all handler
+- src/lib/mcp/tools/google-auth.ts              — reads next-auth.session-token cookie, decodes JWT, returns { accessToken, user } — used by every Google MCP tool
+- src/app/api/oauth/connect/route.ts            — ALTERNATIVE custom OAuth-connect flow (UNUSED by UI)
+- src/app/api/oauth/callback/route.ts           — ALTERNATIVE custom OAuth-callback, persists to UserIntegration table (UNUSED by UI)
+- src/app/api/oauth/status/route.ts             — queries UserIntegration table (UNUSED by UI)
+- src/app/api/oauth/revoke/route.ts             — deactivates UserIntegration row (UNUSED by UI)
+- src/lib/oauth/token-helper.ts                 — getUserToken() helper that reads from UserIntegration (UNUSED by any caller — dead code)
+- prisma/schema.prisma                          — defines UserIntegration model (lines 733-751)
+
+Current code does (TWO parallel, conflicting systems):
+
+  System A — NextAuth (stateless JWT, ACTIVE):
+    IntegrationDashboard calls signIn('google'). User goes through Google OAuth. NextAuth stores access_token / refresh_token / expires_at / scope in a signed JWT cookie ("next-auth.session-token"). jwt() callback auto-refreshes the access_token when it's about to expire (5-min buffer) using the stored refresh_token. session() callback forwards access_token to the client. google-auth.ts reads the cookie + decodes the JWT to retrieve the access_token. Every MCP Google tool (google-drive-uploader, google-calendar-lister, google-contacts-reader, google-docs-reader/writer, google-sheets-* etc.) calls getGoogleAuth() and returns NOT_CONNECTED_ERROR if null.
+
+  System B — Custom integration flow (DEAD CODE):
+    /api/oauth/connect?provider=google starts OAuth with scope = drive.readonly + spreadsheets + userinfo.email. State encodes the user's session token. /api/oauth/callback exchanges code → tokens, fetches userinfo, upserts UserIntegration row with accessToken/refreshToken/expiresAt/scope/accountId. /api/oauth/status returns the row. /api/oauth/revoke soft-deletes. token-helper.getUserToken() reads + auto-refreshes. None of this is reachable from the UI; the IntegrationDashboard uses signIn() instead.
+
+What's broken:
+1. TWO PARALLEL SYSTEMS, NO SHARED TRUTH. NextAuth (JWT cookie) and the UserIntegration DB table are entirely disconnected. IntegrationDashboard only checks useSession() — a user with a UserIntegration row but no active NextAuth session appears "not connected". Conversely, every MCP tool reads the NextAuth JWT cookie, so a token saved in UserIntegration is invisible to them.
+2. CUSTOM OAUTH FLOW IS DEAD CODE. /api/oauth/connect, /api/oauth/callback, /api/oauth/status, /api/oauth/revoke, and lib/oauth/token-helper.ts exist but nothing in the UI calls them. The UserIntegration table receives no writes/reads from anywhere except those 4 routes + the unused helper. They are leftovers from an abandoned design.
+3. NEXTAUTH STATE CLOBBERS THE PRIMARY APP SESSION. The app's main auth uses the custom anzaro_session cookie (looked up via getUserFromToken → db.session). NextAuth's signIn('google') replaces the user's session with a Google-only JWT cookie and does NOT link the Google identity to the existing User row. When an email/password user opens IntegrationDashboard and clicks "ربط Google", NextAuth signs them in fresh as a Google user, wiping their previous session. Every authenticated API (which checks anzaro_session via getUserFromToken) then sees them as logged-out.
+4. STABLE-SECRET FALLBACK IS FRAGILE. auth-nextauth.ts::getStableSecret() falls back to a hash of `${NEXTAUTH_URL}:${GOOGLE_CLIENT_ID}:${GOOGLE_CLIENT_SECRET}:anzaro-v1`. If those env vars are missing, the fallback uses sentinels ("anzaro-google-id", "anzaro-google-secret"), and ANY change to those vars invalidates every active NextAuth session. The fallback also logs a warning that's easy to miss in production.
+5. STALE REFRESH_TOKENS FAIL SILENTLY. The jwt() callback tries to refresh but logs only a console.warn on failure and returns the stale token. The user is left with an expired access_token. Every subsequent MCP call returns 401 with a "افصل واربط حسابك تاني" message — but the UI still shows the account as "متصل" because the NextAuth session itself is alive.
+6. NO USER INTEGRATION ROW CREATED. Even when NextAuth's signIn succeeds, no row is written to UserIntegration. So /api/oauth/status (if it were ever called) would report "not connected" while the dashboard shows "متصل". Two sources of truth, both wrong in different ways.
+
+What needs to be fixed:
+- Pick ONE system. Recommendation: keep NextAuth (because the MCP tools already depend on it) and DELETE the custom /api/oauth/* routes + UserIntegration model + token-helper.ts. OR migrate everything to /api/oauth/* + UserIntegration and delete NextAuth. The current half-migrated state is the root cause.
+- If keeping NextAuth: link the NextAuth Google sign-in to the existing User row (by email) so the user retains their app session. Either share the cookie, or after NextAuth callback, also issue an anzaro_session cookie for the same user.
+- Surface NextAuth refresh failures to the UI (e.g., set a `needsReconnect` flag in the session() callback when refresh fails) so the dashboard can prompt the user to re-link.
+- Remove the dead /api/oauth/* code or wire it up. As-is, it's a maintenance hazard.
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 3: Drive upload uses service account instead of user's account
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/lib/google-drive.service.ts            — 1,158-line service-account-based Drive client (read + write)
+- src/lib/google-drive-credentials.ts        — EMBEDDED service-account JSON, base64-reverse-obfuscated, decoded at runtime
+- src/lib/mcp/tools/google-drive-uploader.ts — MCP tool that uses the USER's OAuth access_token (correct pattern, but only used for plain-text file uploads triggered by chat tool-calling)
+- src/lib/mcp/tools/google-auth.ts           — getGoogleAuth() helper (reads NextAuth cookie)
+- src/app/api/ai/hf/document/route.ts        — calls uploadFileToDrive() (lines 21, 94, 96, 190, 192, 261, 263) — auto-uploads every generated document
+- src/app/api/chat/stream/route.ts           — calls uploadFileToDrive() (lines 1320-1321 Smart-Doc V2 path; lines 4030-4031 inline file-gen path) — fires when user types "ارفع/حفظ + درايف/drive/جوجل"
+- src/components/chat/FilesPanel.tsx         — handleUploadToDrive() fetches '/api/ai/drive/upload' (route does NOT exist — broken button)
+- src/app/api/ai/drive/status/route.ts       — Drive connection status (service-account based)
+- src/app/api/ai/drive/file/[fileId]/route.ts
+- src/app/api/ai/drive/search/route.ts       (NOTE: there is NO /api/ai/drive/upload/route.ts — confirmed via ls)
+
+Current code does:
+  google-drive.service.ts::uploadFileToDrive() and uploadBufferToDrive() build a Drive client via google.auth.JWT using a SERVICE ACCOUNT key sourced from (in priority order): GD_WRITE_SA_PATH env → GD_WRITE_SA_JSON env → fallback to read SA (GD_SERVICE_ACCOUNT_PATH / GD_SERVICE_ACCOUNT_JSON) → fallback to EMBEDDED key in google-drive-credentials.ts. The scope is 'https://www.googleapis.com/auth/drive' (full Drive access for the SA). The uploaded file is created with `parents: [FOLDER_ID]` where FOLDER_ID = process.env.GD_FOLDER_ID — a single shared folder the SA was granted editor access to. The file is OWNED BY THE SERVICE ACCOUNT, not by the user. The user never sees it in their own Drive (the returned webViewLink only works if the SA has explicitly shared the file with the user, which never happens).
+
+  In contrast, the MCP tool google-drive-uploader.ts calls getGoogleAuth() to read the user's OAuth access_token from the NextAuth cookie, then does a multipart upload to https://www.googleapis.com/upload/drive/v3/files with `Authorization: Bearer <user_token>`. This uploads to the user's own Drive (under the user's account, drive.file scope). This path is CORRECT — but it is only invoked from the chat tool-calling flow when the user says "ارفعلي ملف" / "احفظ النص ده". The auto-upload code in chat/stream/route.ts and ai/hf/document/route.ts does NOT use this path.
+
+What's broken:
+1. AUTO-UPLOADS GO TO THE SERVICE ACCOUNT'S DRIVE, NOT THE USER'S. When a user says "لخص المحاضرة وارفعها على Drive", the PDF is generated, then uploadFileToDrive() uploads it to the SA's FOLDER_ID. The user can't see the file in their own Drive. The returned webViewLink only works for the SA.
+2. NO CONDITIONAL LOGIC. Even if the user has linked their Google account via NextAuth (so getGoogleAuth() returns a valid token), the auto-upload code path STILL uses the service account. There's no `if (userGoogleAuth) { uploadViaUserAccount() } else { uploadViaServiceAccount() }` branch.
+3. FILESPANEL.TSX CALLS A NON-EXISTENT ROUTE. handleUploadToDrive() does `fetch('/api/ai/drive/upload', { method: 'POST', ... })`. Confirmed via `ls`: only `file/`, `search/`, `status/` exist under /api/ai/drive/. The "Upload to Drive" button in FilesPanel silently 404s.
+4. GLOBAL CACHED CLIENT IS UNSAFE ACROSS USERS. _writeDriveClient (line 990) is a module-level singleton. Even if uploadFileToDrive accepted a user token, the cache would leak between users. (Same issue with _driveClient at line 154 for reads.)
+5. EMBEDDED SERVICE ACCOUNT IS A SECURITY SMELL. google-drive-credentials.ts ships a (lightly obfuscated, base64-reversed) service-account JSON in the repo. The fallback at lines 36-41 of credentials file means the app "succeeds" at Drive uploads even when no admin has configured GD_* env vars — reinforcing the silent-wrong-account behavior. Anyone with repo read access has the key.
+6. PARENTS=FOLDER_ID IS WRONG FOR USER UPLOADS. When using the user's token, parents:[FOLDER_ID] would try to add the file to the service account's folder — which the user doesn't have access to — and the upload fails. The user-token path must omit `parents` (uploads to user's My Drive root) or use a folder ID the user owns.
+
+What needs to be fixed (so uploads go to the USER's Drive when their account is linked):
+1. Refactor uploadFileToDrive / uploadBufferToDrive to accept an optional userAccessToken?: string parameter. If provided, construct the Drive client via `new google.auth.OAuth2().setCredentials({ access_token: userAccessToken })` (or directly hit the Drive REST endpoint with `Authorization: Bearer <token>` like the MCP tool does) instead of the SA JWT.
+2. At every call site (chat/stream/route.ts L1320 & L4030, ai/hf/document/route.ts L94/190/261), call getGoogleAuth() FIRST. If it returns a token, pass it to uploadFileToDrive({ ..., userAccessToken: auth.accessToken }). If null, fall back to the SA path so unauthenticated/guest users still get auto-upload.
+3. When using the user's token, do NOT set `parents: [FOLDER_ID]` — either omit `parents` (uploads to user's My Drive root) or use a folder ID the user owns / has provided.
+4. Per-credential cache for the Drive client (key by token hash or user id) instead of a global singleton — OR just don't cache the user-token client (constructing OAuth2 + setCredentials is cheap).
+5. Implement the missing /api/ai/drive/upload/route.ts (or change FilesPanel.tsx to invoke the google_drive_uploader MCP tool via the existing tool endpoint) so the "Upload to Drive" button works.
+6. Remove or gate the embedded service-account JSON in google-drive-credentials.ts behind an explicit env flag (ALLOW_EMBEDDED_SA_FALLBACK=true) so production deployments don't accidentally use a committed key.
+7. Decide on the UserIntegration vs NextAuth split (see Issue 2) — once settled, the user-token source for uploadFileToDrive is unambiguous.
+
+*Last updated: 2025-01-30 (investigate-google-oauth) — RESEARCH ONLY, no code changes.*
+
+---
+
+Task ID: investigate-mic-ui
+Agent: explore (Z.ai Code)
+Task: RESEARCH ONLY — investigate 5 UI/UX issues (mic button hang, app freeze, AI ops display, send→stop toggle, timeout removal). No code changes.
+
+Summary of Findings:
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 1: Mic button hanging — doesn't capture speech
+("لما بضغط علي علامه المايك بيقعد يحمل ومش بيفرغ الكلام")
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/components/chat/ChatInput.tsx (lines 192–296, 1206–1242) — the small mic button in the main chat input
+  - mediaRecorderRef (192), startRecording (215), stopRecording (292), Mic button JSX (1231–1242)
+- src/app/api/ai/asr/route.ts (lines 29–143) — ASR endpoint (Groq Whisper primary, ZAI SDK fallback)
+- src/components/chat/VoiceChatOverlay.tsx (lines 340–596) — separate, larger voice-chat overlay (opened via /صوت slash command); not the button the user is complaining about
+
+Current code does:
+1. User clicks Mic → startRecording() requests getUserMedia, builds MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' }), calls mediaRecorder.start().
+2. Button toggles to a MicOff icon (red, with ping animation).
+3. User clicks again → stopRecording() → mediaRecorderRef.current.stop() → fires mediaRecorder.onstop callback.
+4. onstop (line 227): stops tracks, builds a Blob, sets isRecording=false + isTranscribing=true, POSTs FormData to /api/ai/asr.
+5. /api/ai/asr calls Groq Whisper (5_000ms timeout, line 72), falls back to ZAI SDK.
+6. On 200 response, data.text is appended to the textarea (line 268–275).
+
+What's broken:
+1. **5-second Groq Whisper timeout is too short.** `signal: AbortSignal.timeout(5_000)` at asr/route.ts line 72. For audio ≥ ~10s (most normal utterances), Groq frequently exceeds this. The fallback ZAI SDK is slower and may also fail. The user perceives this as "loads forever, never produces text".
+2. **No user-visible error feedback.** ChatInput.tsx lines 276–280 only `console.error('[ASR] Error:', error)` — no error state, no toast, no inline message. The Loader2 spinner simply stops and the user is left guessing.
+3. **Click-while-transcribing is a dead click.** Line 1209: `onClick={isRecording ? stopRecording : startRecording}`. When isTranscribing (and not recording), clicking the button calls startRecording — but the button is also `disabled={isDisabled || anyAttachmentLoading}` (line 1217) where `isDisabled = isStreaming || isBatchProcessing || isTranscribing` (line 203). So the click is silently ignored. The user clicks the spinner, nothing happens — exactly the "بيقعد يحمل" complaint.
+4. **Silent return for tiny audio.** Lines 233–237: if `audioBlob.size < 1000`, the function silently returns. If the user clicks Mic and immediately clicks Stop (or the mic fails), no message is shown.
+5. **Silent mic-permission denial.** Lines 286–289 only console.error — no UI feedback if the browser blocks mic access.
+6. **Safari codec mismatch.** `audio/webm;codecs=opus` is unsupported on Safari (which uses audio/mp4). `new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })` will throw on Safari → caught at line 286 → isRecording set false, no UI feedback.
+7. **No "transcribing…" label.** The button shows a bare Loader2 spinner with no text. The user has no idea whether the spinner means "recording" or "transcribing" or "failed".
+
+What needs to be fixed:
+- Increase Groq Whisper timeout to 30–60s (or remove it entirely — Groq is fast even for long audio).
+- Surface ASR errors to the UI: add an `asrError` state, show a small inline message ("فشل التحويل، حاول تاني") under the mic button or as a toast.
+- Replace the disabled-while-transcribing behavior with a clearly labeled "جاري التحويل…" button that ignores clicks cleanly.
+- Use `MediaRecorder.isTypeSupported('audio/webm;codecs=opus')` to pick a supported codec (fallback to `audio/mp4` for Safari, or omit mimeType to let the browser pick).
+- Show a hint text while recording: "يسجّل… اضغط للإيقاف" so the user knows what to do.
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 2: App hanging/freezing frequently ("بيعلق")
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/store/chat-store.ts (lines 246–1708) — Zustand store with `persist` middleware, NO debounce
+- src/store/chat-store.ts (lines 352–378) — `updateMessage` called on every SSE token chunk
+- src/store/chat-store.ts (lines 1014–1087) — file-asset polling loop that blocks isStreaming reset
+- src/store/chat-store.ts (lines 651–661, 752–758) — 20-minute safety net + 20-minute stream watchdog
+- src/store/chat-store.ts (lines 944–947) — `accumulatedContent += parsed.content; get().updateMessage(...)` per token
+- src/app/api/chat/stream/route.ts (lines 1735–1806) — enqueueContent runs a heavy HTML-detection regex on every chunk
+- src/app/api/chat/stream/route.ts (lines 2093–2114) — Cerebras 3s timeout + 50ms busy-wait loop
+- src/components/chat/MessageList.tsx (lines 79–87) — setInterval every 500ms during streaming (auto-scroll)
+- src/components/chat/StatusBar.tsx (lines 64–95) — two always-on setIntervals (Drive status 5min, last-update 30s)
+- src/components/chat/MessageBubble.tsx — re-renders on every chunk via store subscription
+
+Potential causes (ranked by likelihood):
+
+1. **NO DEBOUNCE on the persist middleware — HIGH SEVERITY.** `persist(...)` at chat-store.ts line 247 has no `debounce` option and no manual throttling. Every `set()` call triggers `JSON.stringify` of the entire partialized state (up to 200 conversations × 500 messages each, per partialize limits at lines 1715–1716) plus a synchronous `localStorage.setItem`. During streaming, `updateMessage` is called on EVERY SSE token chunk (chat-store.ts lines 944–947). For a 5000-token response, that's 5000+ synchronous localStorage writes on the main thread. **This is almost certainly the primary cause of "app hangs" during streaming.**
+
+2. **updateMessage clones the entire conversations array per chunk.** Lines 364–376: `state.conversations.slice()` (O(n) over all conversations) + `conv.messages.slice()` (O(m) over all messages in the active conversation). For long conversations this is expensive per-token.
+
+3. **File-asset polling blocks isStreaming reset for up to 150s.** Lines 1014–1087: After the SSE stream closes, if `fileGenStatus === 'generating'`, the code enters a polling loop (`for (let attempt = 0; attempt < 30; attempt++)` with `setTimeout(5000)` per attempt = 150s max). The `finally` block at line 1099 (which sets `isStreaming: false`) only runs AFTER this loop completes. If file generation is stuck, the UI shows "streaming…" for 2.5 minutes with no way out.
+
+4. **20-minute safety net is way too long.** Line 651: `setTimeout(..., 20 * 60 * 1000)`. If a stream silently dies (backend crash, network drop without abort event), the UI stays in "streaming" state for 20 minutes. The user can't send new messages cleanly during this time.
+
+5. **Heavy regex on every backend chunk.** enqueueContent (route.ts line 1736) runs a long HTML-detection regex (line 1798) on every token. For high-token-rate providers (Cerebras ~2000 T/s), this regex runs thousands of times per second on the backend, slowing the stream's TTFB and throughput.
+
+6. **Cerebras 50ms busy-wait loop.** Lines 2112–2114: `while (!cerebrasStreamDone && !streamClosed) { await new Promise((r) => setTimeout(r, 50)); }`. If Cerebras hangs without throwing, this loop runs indefinitely. Should be replaced with a Promise that resolves when cerebrasStreamDone flips.
+
+7. **Multiple always-on setIntervals in always-mounted components.** StatusBar has two (Drive 5min, last-update 30s). MessageList has a 500ms auto-scroll interval during streaming. Each fires setState → triggers persist → triggers re-render. Compounds with cause #1.
+
+8. **MessageList re-renders ALL messages on every chunk.** MessageList.tsx line 11: `const { conversations, activeConversationId, isStreaming } = useChatStore();` — subscribes to the entire conversations array. Every chunk updates conversations → MessageList re-renders → maps over all messages → every MessageBubble re-renders. Should use a selector + memoization to only re-render the active message.
+
+What needs to be fixed (priority order):
+1. Add a `debounce: 500` (or implement a manual throttled writer) to the persist middleware so localStorage writes happen at most every 500ms, not on every token.
+2. Skip persist entirely while `isStreaming === true`; re-persist once when streaming ends.
+3. Move the file-asset polling loop OUT of the sendMessage try/finally so isStreaming resets as soon as the SSE stream closes; run polling in parallel.
+4. Reduce the 20-min safety net to ~3–5 min, OR detect stream death faster (the watchdog at line 752 already polls every 30s — just lower the 20min threshold to 3min).
+5. Use Zustand selectors in MessageList so only the active conversation's messages trigger re-renders.
+6. Memoize MessageBubble with React.memo + a custom comparator so unrelated messages don't re-render on every chunk.
+7. Replace the Cerebras busy-wait with a Promise resolver.
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 3: Show AI operations to user (replace 3-dots loading)
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/components/chat/MessageBubble.tsx (lines 799–804) — the 3-dots `streaming-dots` indicator (shown when content==='' && isStreaming)
+- src/components/chat/MessageBubble.tsx (lines 805–812) — plain text + blinking cursor during streaming (when content has started)
+- src/components/chat/MessageBubble.tsx (lines 918–933) — `backendStatus` pill (only renders when message has backendStatus)
+- src/components/chat/MessageBubble.tsx (lines 936–952, 976–981, 991–1010) — separate loading cards for image / video / file generation
+- src/components/chat/MessageBubble.tsx (lines 1152–1164) — DocumentProgressCard shown only when documentGenProgress is set
+- src/components/chat/ProgressIndicator.tsx (lines 301–583) — FULL progress UI with stage pipeline + trace log — **NOT RENDERED ANYWHERE**
+- src/components/chat/DocumentProgressCard.tsx (full file) — beautiful progress card (stages, %, ETA, trace log) — only used for document generation
+- src/store/chat-store.ts (lines 145, 254, 528–557, 1389, 1455–1466) — `streamingProgress` state, only updated during batch processing
+- src/store/chat-store.ts (lines 949–961) — `backendStatus` SSE event handler, attaches to message
+- src/app/api/chat/stream/route.ts (lines 1072, 1085, 1092, 1106, 1114, 1133, 1152, 1160, 1221, 1230, 1243, 1255, 1275, 1293, 1306, 1318, 1334, 1381, 1394) — smartDocProgress / smartDocStatus / smartDocResult SSE events
+- src/app/api/chat/stream/route.ts (lines 1868, 2301, 2567) — backendStatus SSE events (with phase: 'thinking' | 'executing' | 'finalizing')
+- src/app/api/chat/stream/route.ts (lines 1865–1869, 2299–2301, 2564–2568) — three `sendStatus`/`_sendPreStatus` helpers that emit backendStatus
+
+What the current code does:
+- 3-dots: shown when assistant message content is empty AND isStreaming (MessageBubble line 799). CSS animation defined in globals.css lines 276–287.
+- backendStatus: When the backend sends `{ backendStatus: "بنفّذ أداة: البحث في جهات الاتصال", phase: "executing" }`, the chat store attaches it to the assistant message (chat-store line 957). MessageBubble renders it as a small blue pill with a ping animation (lines 918–933). But this pill is positioned BELOW the 3-dots, not replacing them.
+- smartDocProgress: When sent, chat-store calls setDocumentGenProgress(...) (line 901). MessageBubble shows DocumentProgressCard (lines 1152–1164) — but only if documentGenProgress is set AND isStreaming.
+- streamingProgress: Tracked in the store with setStreamingProgress, but ONLY updated during batch processing (lines 1259, 1270, 1390, 1455, 1466). The chat stream route NEVER sends an event that updates streamingProgress. So ProgressIndicator (which reads streamingProgress) shows nothing for normal chat.
+
+What's broken / missing:
+1. **ProgressIndicator is dead code.** The component at ProgressIndicator.tsx is fully implemented (stage pipeline with emojis, durations, trace log) but is NOT rendered in ChatApp.tsx or anywhere else. Its constants DOC_STAGE_ORDER and DOC_STAGE_LABELS are imported by DocumentProgressCard, but the component itself is unused.
+2. **streamingProgress is never populated for normal chat.** The chat stream route emits backendStatus events but NOT streamingProgress events. So even if ProgressIndicator were rendered, it would only show fallback stages.
+3. **The 3-dots `streaming-dots` is shown for the entire "thinking" phase** — from when the user sends a message until the first token arrives. For tool-calling flows (which can take 10–30s for contact search, calendar, etc.), the user sees ONLY 3 dots with no indication that the AI is executing tools. The backendStatus pill appears BELOW the 3-dots, not replacing them.
+4. **backendStatus is overwritten by the latest status.** Each new backendStatus event replaces the previous one on the message (chat-store lines 953–961). There's no history — the user can't see "thought → executed tool X → executed tool Y → writing reply" as a sequence.
+5. **No unified "AI operations" view.** Image / video / file generation each have their own inline loading cards (lines 936–1010), but they're visually disjoint from the backendStatus pill and from the DocumentProgressCard.
+
+What UI changes are needed:
+1. Replace the 3-dots `streaming-dots` with a richer "AI is working" card that shows:
+   - The current backendStatus text (or a default "بيفكّر..." if none)
+   - The current phase (thinking / executing / writing) as a colored badge
+   - A trace history of past statuses (vertical timeline so the user sees the sequence of operations)
+2. Render ProgressIndicator somewhere in ChatApp (e.g., as a sticky header above MessageList during streaming) OR refactor backendStatus history to be displayed inline in MessageBubble.
+3. Pipe backendStatus events into streamingProgress (or add a new `backendStatusHistory: Array<{ status, phase, timestamp }>` field on the message) so the existing ProgressIndicator component can show them.
+4. Unify the document / image / video / file generation progress cards so they all use the DocumentProgressCard pattern (stage pipeline + trace log).
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 4: Send button should become Stop/Cancel button
+═══════════════════════════════════════════════════════════════════════
+
+Files involved:
+- src/components/chat/ChatInput.tsx (lines 1269–1277) — the "stop" button (X icon, rose-600 bg) shown when isStreaming === true
+- src/components/chat/ChatInput.tsx (line 506, 509) — handleSubmit, with early-return guard `if (... || isDisabled || anyLoading) return;`
+- src/components/chat/ChatInput.tsx (line 203) — `isDisabled = isStreaming || isBatchProcessing || isTranscribing`
+- src/store/chat-store.ts (lines 241–244) — module-level `activeStreamAbortController`
+- src/store/chat-store.ts (lines 581–592) — abort previous stream when a NEW sendMessage begins
+- src/store/chat-store.ts (lines 1102–1107) — finally block that clears activeStreamAbortController
+- src/store/chat-store.ts — **NO stopStreaming / abortStream / cancelStream action exposed**
+
+Current code does:
+- When isStreaming === true, ChatInput shows a rose-colored X button (lines 1269–1277) with aria-label="إلغاء البث" (cancel stream).
+- Clicking it calls handleSubmit (line 1271).
+- handleSubmit (line 506) immediately early-returns because isDisabled is true (since isStreaming is true). Line 509: `if ((!trimmed && attachments.length === 0) || isDisabled || anyLoading) return;`
+- So **the X button is a no-op**. The user clicks "cancel" and nothing happens.
+- The only way to abort a stream is to send a NEW message — the safety guard at chat-store.ts line 581 detects isStreaming === true and aborts the previous activeStreamAbortController before starting the new one.
+
+What's broken / missing:
+1. **The X button is a no-op.** It calls handleSubmit which early-returns due to isDisabled.
+2. **No stopStreaming action exists in the store.** The activeStreamAbortController is module-level and only aborted from inside sendMessage (when a new message starts). There's no exposed store action for the UI to call.
+3. **No backend cancel endpoint.** Aborting the client-side fetch (via abortController.abort()) will close the SSE connection, but the backend will keep running (LLM call, tool execution, file generation) until it tries to write to the closed stream and fails. There's no /api/chat/cancel endpoint that would signal the backend to set streamClosed = true proactively. (The backend does check `if (streamClosed) break;` in many loops — e.g., route.ts lines 2691, 3461, 4143 — so closing the client connection will eventually stop it, but not instantly.)
+
+What needs to be fixed:
+1. Add a `stopStreaming: () => void` action to the chat store that:
+   - Calls `activeStreamAbortController?.abort()` (if it exists)
+   - Sets `isStreaming: false`, `streamingProgress: null`
+   - Optionally appends a "⏹️ تم الإلغاء بواسطة المستخدم" note to the current assistant message
+2. Change the X button's onClick from `handleSubmit` to `stopStreaming` (from the store).
+3. (Optional but recommended) Add a `/api/chat/cancel` endpoint that the client can call to signal the backend to set streamClosed = true immediately. Or rely on the SSE connection close + the backend's existing `if (streamClosed) break;` checks (cheaper, slightly slower to stop).
+
+═══════════════════════════════════════════════════════════════════════
+ISSUE 5: Timeout removal ("نشيل فكره التايم اوت دي خلاص")
+═══════════════════════════════════════════════════════════════════════
+
+ALL TIMEOUT LOCATIONS (must be removed per user request):
+
+**Backend — src/app/api/chat/stream/route.ts:**
+- Line 385: `signal: AbortSignal.timeout(15_000)` — mediaResponse (internal call to /api/ai/play-media)
+- Line 1478: `signal: AbortSignal.timeout(60_000)` — ZAI CogView-3-Flash image generation
+- Line 1485: `signal: AbortSignal.timeout(30_000)` — image download from URL
+- Line 1585: `signal: AbortSignal.timeout(30_000)` — video generation
+- Line 1602: `signal: AbortSignal.timeout(15_000)` — asset status polling
+- Line 2093: `cerebrasTimeout = setTimeout(..., 3_000)` — Cerebras first-token race
+- Line 2233: `signal: AbortSignal.timeout(30_000)` — vision model (glm-4v) fetch
+- Line 2260: `signal: AbortSignal.timeout(30_000)` — Pollinations vision fetch
+- Line 3445: `signal: AbortSignal.timeout(120_000)` — custom HF endpoint
+- Line 3787: `setTimeout(..., 45_000)` — quiz generation race
+- Line 3913: `setTimeout(..., 120_000)` — PPTX generation
+- Line 3954: `setTimeout(..., 90_000)` — Playwright PDF rendering
+- Lines 1832–1839: timeoutId is ALREADY null (disabled) and startInactivityWatchdog is ALREADY a no-op. **The main stream timeout is already removed.**
+- Line 1820: `setInterval(..., 15_000)` — heartbeat (KEEP — this is a keepalive, not a timeout)
+
+**Backend — src/lib/chat/smart-doc-v2.ts:**
+- Line 85: `const OVERALL_TIMEOUT_MS = 10 * 60 * 1000;` (10 minutes) — **THE ONE THE USER NAMED**
+- Lines 167–181: `callLLMWithTimeout` with `timeoutMs: number = 60_000` (60s default) — Promise.race with setTimeout
+- Lines 827–842: `processSmartDocV2` wraps the pipeline in `Promise.race([pipelinePromise, timeoutPromise])` (10min)
+- Line 206: `setInterval(..., 5_000)` — heartbeat during PDF extraction (KEEP — keepalive)
+
+**Backend — src/app/api/voice/chat/route.ts:**
+- Lines 80–87: `withTimeout` helper (Promise.race with setTimeout)
+- Lines 158–160: `withTimeout(tryZAI/tryCerebras/tryGroq, 4_000, ...)` — 4s race per provider
+- Line 173: `withTimeout(tryOpenRouter, 8_000, ...)` — 8s fallback
+- Line 53: `setInterval(..., 30 * 60 * 1000)` — session history cleanup (KEEP — not a timeout)
+
+**Backend — src/app/api/ai/asr/route.ts:**
+- Line 72: `signal: AbortSignal.timeout(5_000)` — Groq Whisper (5s) — also relevant to Issue 1
+
+**Frontend — src/store/chat-store.ts:**
+- Line 651: `setTimeout(..., 20 * 60 * 1000)` — 20-min safety net (auto-reset isStreaming)
+- Line 669: `setTimeout(..., 600_000)` — 10-min fetch timeout (initial connection abort)
+- Lines 752–758: `setInterval(..., 30_000)` — stream watchdog (20min inactivity threshold, calls reader.cancel())
+
+**Frontend — src/components/chat/VoiceChatOverlay.tsx:**
+- Line 377: `setTimeout(..., 15_000)` — processing timeout for /api/voice/chat
+
+What needs to be fixed (per user request "remove the timeout concept entirely"):
+1. **smart-doc-v2.ts**: Delete `OVERALL_TIMEOUT_MS` (line 85). Remove the `timeoutPromise` wrapper in `processSmartDocV2` (lines 827–842) — just `return executePipeline(...)`. Either delete `callLLMWithTimeout` (line 164) or rename it to `callLLM` and remove the Promise.race. Update all callers (search for `callLLMWithTimeout`).
+2. **chat/stream/route.ts**: Remove the per-call `AbortSignal.timeout(...)` calls (lines 385, 1478, 1485, 1585, 1602, 2233, 2260, 3445). Remove the Cerebras 3s timeout (line 2093). Remove the quiz 45s (line 3787), PPTX 120s (line 3913), Playwright 90s (line 3954) — let each operation run until it naturally completes or fails.
+3. **asr/route.ts**: Remove the 5s Groq timeout (line 72).
+4. **voice/chat/route.ts**: Remove the `withTimeout` helper (line 80) and the 4s/8s races (lines 158–160, 173). Just `await Promise.any([...])` directly — first provider to finish wins, others run to completion in the background.
+5. **chat-store.ts**: Remove the 20-min safety net (line 651), the 10-min fetch timeout (line 669), and the stream watchdog (line 752). Replace with NO timeout — let the stream run until the backend closes it or the user aborts (via the new stopStreaming action from Issue 4).
+6. **VoiceChatOverlay.tsx**: Remove the 15s processing timeout (line 377).
+
+**⚠️ IMPORTANT CAVEAT — keep these alive:**
+- The heartbeat `setInterval` at chat/stream/route.ts line 1820 (15s keepalive) MUST stay — without it, HF Spaces / Cloudflare will close idle SSE connections after ~10s and the stream will die.
+- The heartbeat `setInterval` at smart-doc-v2.ts line 206 (5s keepalive during PDF extraction) MUST stay for the same reason.
+- The `setInterval` at voice/chat/route.ts line 53 (session history cleanup, 30min) is unrelated to timeouts — keep it.
+
+Removing ALL timeouts means an operation that hangs (e.g., Groq is down, Playwright crashes without rejecting) will run forever. The user explicitly accepted this trade-off ("نشيل فكره التايم اوت دي خلاص"). The mitigation is the new stopStreaming action (Issue 4) — the user can manually cancel a stuck stream. Recommend also adding server-side logging so hung operations are visible in HF logs.
+
+*Last updated: 2025-01-30 (investigate-mic-ui) — RESEARCH ONLY, no code changes.*

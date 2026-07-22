@@ -194,7 +194,7 @@ export function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashContainerRef = useRef<HTMLDivElement>(null);
-  const { isStreaming, isBatchProcessing, sendMessage, processBatchFiles, activeModel, autoWebSearch, setAutoWebSearch } = useChatStore();
+  const { isStreaming, isBatchProcessing, sendMessage, processBatchFiles, activeModel, autoWebSearch, setAutoWebSearch, stopStreaming } = useChatStore();
 
   const charCount = value.length;
   const maxRows = 5;
@@ -1268,10 +1268,13 @@ export function ChatInput() {
             </motion.button>
           ) : isStreaming ? (
             <button
-              onClick={handleSubmit}
+              onClick={(e) => {
+                e.preventDefault();
+                stopStreaming();
+              }}
               className="flex-shrink-0 p-1.5 rounded-lg transition-all duration-200 min-h-[36px] min-w-[36px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-md"
-              aria-label="إلغاء البث"
-              title="إلغاء البث"
+              aria-label="إيقاف الرد"
+              title="إيقاف الرد"
             >
               <X className="size-4" />
             </button>

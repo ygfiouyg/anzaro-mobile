@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
           'Authorization': `Bearer ${GROQ_API_KEY}`,
         },
         body: groqFormData,
-        signal: AbortSignal.timeout(5_000), // 5s timeout
+        signal: AbortSignal.timeout(60_000), // V.39: increased from 5s to 60s — 5s was too short for normal speech
       });
 
       if (groqResponse.ok) {

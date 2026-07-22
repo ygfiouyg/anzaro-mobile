@@ -824,22 +824,12 @@ export async function processSmartDocV2(
 ): Promise<SmartDocV2Result> {
   const startTime = Date.now();
 
-  // ── Overall timeout wrapper ──
-  const timeoutPromise = new Promise<SmartDocV2Result>((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: false,
-        durationMs: Date.now() - startTime,
-        error: input.language === 'en'
-          ? 'Operation timed out after 5 minutes'
-          : 'انتهت المهلة بعد 5 دقائق',
-      });
-    }, OVERALL_TIMEOUT_MS);
-  });
-
-  const pipelinePromise = executePipeline(input, onProgress, startTime);
-
-  return Promise.race([pipelinePromise, timeoutPromise]);
+  // V.39: Removed the overall timeout wrapper (OVERALL_TIMEOUT_MS).
+  // The user explicitly requested removing all timeouts — "نشيل فكره التايم اوت دي خلاص".
+  // The timeout was cutting off long operations (PDF summarization of 50+ page files)
+  // before they could complete. Now the pipeline runs until it finishes or errors.
+  // The user can manually cancel via the Stop button (stopStreaming action in chat-store).
+  return executePipeline(input, onProgress, startTime);
 }
 
 /**

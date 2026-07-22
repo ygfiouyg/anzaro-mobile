@@ -207,6 +207,10 @@ interface ChatState {
   clearConversations: () => void;
   setStreamingProgress: (progress: { stage: string; detail: string } | null) => void;
   sendMessage: (content: string, attachments?: File[], forceSearch?: boolean) => Promise<void>;
+  // V.39: Stop/cancel the current AI response. Aborts the fetch request and
+  // resets isStreaming so the UI recovers immediately. The user explicitly
+  // requested this — "زرار الارسال لما AI بيرد يتحول لزرار فصل او كنسل".
+  stopStreaming: () => void;
   loadConversations: () => Promise<void>;
   generatedFiles: Array<{ id: string; name: string; url: string; type: string; createdAt: string; size: number }>;
   addGeneratedFile: (file: { id: string; name: string; url: string; type: string; createdAt: string; size: number }) => void;
@@ -643,14 +647,12 @@ export const useChatStore = create<ChatState>()(
 
         set({ isStreaming: true });
 
-        // ─── Safety net: Auto-reset isStreaming after 20 minutes ──────────
-        // This prevents the chat from getting permanently stuck if the stream
-        // fails silently or the connection drops without proper cleanup.
-        // 20 minutes matches the backend inactivity timeout — only triggers
-        // after 20 minutes of ZERO activity (tokens, heartbeats, etc.)
+        // V.39: Safety net reduced from 20 minutes to 5 minutes.
+        // The user can now manually cancel via the Stop button, so this is
+        // just a last-resort safety net — not the primary timeout mechanism.
         const safetyNetId = setTimeout(() => {
           if (get().isStreaming) {
-            console.error('[Chat] Safety net: isStreaming stuck for 20min — force resetting');
+            console.error('[Chat] Safety net: isStreaming stuck for 5min — force resetting');
             // Also abort the stream controller
             if (activeStreamAbortController) {
               try { activeStreamAbortController.abort(); } catch { /* ignore */ }
@@ -658,7 +660,7 @@ export const useChatStore = create<ChatState>()(
             }
             set({ isStreaming: false, streamingProgress: null });
           }
-        }, 20 * 60 * 1000);
+        }, 5 * 60 * 1000);
 
         // ─── AbortController for fetch timeout ────────────────────────────
         // Track this as the active stream controller so we can abort it later
@@ -1105,6 +1107,19 @@ export const useChatStore = create<ChatState>()(
           }
           set({ isStreaming: false, streamingProgress: null });
         }
+      },
+
+      // V.39: Stop/cancel the current AI response.
+      // Aborts the fetch request and resets isStreaming so the UI recovers immediately.
+      stopStreaming: () => {
+        if (activeStreamAbortController) {
+          try {
+            activeStreamAbortController.abort();
+            console.log('[Chat] User stopped streaming — AbortController aborted');
+          } catch { /* ignore */ }
+          activeStreamAbortController = null;
+        }
+        set({ isStreaming: false, streamingProgress: null });
       },
 
       // ─── Batch Processing Actions ────────────────────────────────────
@@ -1707,6 +1722,12 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'delta-chat-storage',
+      // V.39: Debounce localStorage writes to prevent app freezing.
+      // Without this, every SSE token chunk triggers a synchronous
+      // JSON.stringify + localStorage.setItem on the main thread.
+      // For a 5000-token response, that's ~5000 blocking writes → UI freezes.
+      // With 2000ms debounce, writes are batched — max 1 write per 2 seconds.
+      debounce: 2000,
       partialize: (state) => {
         // ─── Strip large data from conversations before persisting ─────────
         // This prevents localStorage overflow (5MB limit) from large base64
