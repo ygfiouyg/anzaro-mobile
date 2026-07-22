@@ -67,10 +67,10 @@ export async function transcribeWithGemini(
         console.log(`[Gemini-ASR] File uploaded: ${fileUri?.slice(0, 80)}`);
       } else {
         const errText = await uploadResp.text();
-        console.error(`[Gemini-ASR] File upload failed ${uploadResp.status}: ${errText.slice(0, 300)}`);
+        console.log(`[Gemini-ASR] File upload failed ${uploadResp.status}: ${errText.slice(0, 300)}`);
       }
     } catch (uploadErr) {
-      console.error(`[Gemini-ASR] File upload error:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr));
+      console.log(`[Gemini-ASR] File upload error:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr));
     }
   }
 
@@ -98,7 +98,7 @@ export async function transcribeWithGemini(
       signal: AbortSignal.timeout(60_000),
     });
   } catch (fetchErr) {
-    console.error(`[Gemini-ASR] Fetch failed:`, fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
+    console.log(`[Gemini-ASR] Fetch failed:`, fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
     throw new Error(`Gemini fetch failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
   }
 
@@ -106,7 +106,7 @@ export async function transcribeWithGemini(
 
   if (!response.ok) {
     const errText = await response.text();
-    console.error(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 500)}`);
+    console.log(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 500)}`);
     throw new Error(`Gemini ASR error ${response.status}: ${errText.slice(0, 200)}`);
   }
 
@@ -115,7 +115,7 @@ export async function transcribeWithGemini(
   
   // Check for safety blocks or empty responses
   if (!data?.candidates?.[0]) {
-    console.error(`[Gemini-ASR] No candidates in response. Full response:`, JSON.stringify(data).slice(0, 500));
+    console.log(`[Gemini-ASR] No candidates in response. Full response:`, JSON.stringify(data).slice(0, 500));
     if (data?.promptFeedback?.blockReason) {
       throw new Error(`Gemini blocked: ${data.promptFeedback.blockReason}`);
     }
