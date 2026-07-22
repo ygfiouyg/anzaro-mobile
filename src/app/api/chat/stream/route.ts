@@ -173,6 +173,26 @@ async function buildLLMMessages(
 
 
 // ─── POST Handler ────────────────────────────────────────────────────
+
+// V.45: Get user's Google access token for Drive uploads
+async function getUserGoogleAccessToken(userId: string): Promise<string | null> {
+  try {
+    const integration = await db.userIntegration.findFirst({
+      where: { userId, provider: 'google' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (integration?.accessToken) {
+      // Check if token is still valid
+      if (integration.tokenExpiresAt && integration.tokenExpiresAt > new Date()) {
+        return integration.accessToken;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   // ── Rate limiting for chat stream (most resource-intensive endpoint) ──
   const { checkRateLimit, RATE_LIMIT_PRESETS } = await import('@/lib/rate-limit');
@@ -1318,7 +1338,8 @@ export async function POST(request: NextRequest) {
                         encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage: 'uploading', progress: 92, message: '☁️ جاري الرفع على Google Drive...' } })}\n\n`)
                       );
                       const { uploadFileToDrive } = await import('@/lib/google-drive.service');
-                      const uploadResult = await uploadFileToDrive(result.filePath, result.fileName, 'application/pdf');
+                      const userToken = user ? await getUserGoogleAccessToken(user.id) : undefined;
+                      const uploadResult = await uploadFileToDrive(result.filePath, result.fileName, 'application/pdf', userToken);
                       driveLink = uploadResult?.webViewLink || null;
                       if (driveLink) {
                         console.log(`[Chat] Smart Doc: Drive link: ${driveLink}`);
@@ -4028,7 +4049,8 @@ ${toolData}${extraStr}
                     if (fileType === 'pdf') {
                       try {
                         const { uploadFileToDrive } = await import('@/lib/google-drive.service');
-                        const uploadResult = await uploadFileToDrive(filePathSave, fileName, 'application/pdf');
+                        const userToken = user ? await getUserGoogleAccessToken(user.id) : undefined;
+                        const uploadResult = await uploadFileToDrive(filePathSave, fileName, 'application/pdf', userToken);
                         driveLink = uploadResult?.webViewLink || null;
                         if (driveLink) console.log(`[Chat] File gen: Drive link: ${driveLink}`);
                       } catch (driveErr) {

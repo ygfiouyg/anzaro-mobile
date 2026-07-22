@@ -24,7 +24,8 @@ export async function GET() {
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: 'code',
-    scope: 'email profile', // بس — بدون verification
+    // V.45: Added Drive scopes so user can upload to their own Google Drive
+    scope: 'email profile https://www.googleapis.com/auth/drive.file',
     state,
     prompt: 'select_account',
   });

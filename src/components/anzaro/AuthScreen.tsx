@@ -139,9 +139,22 @@ export function AuthScreen() {
     window.location.href = '/api/auth/google';
   };
 
-  const handleGuest = () => {
-    // Quick guest registration — creates a throwaway account
-    window.location.href = '/api/auth/google?guest=1';
+  const handleGuest = async () => {
+    // V.45: Guest login — creates a throwaway account via API (not Google OAuth)
+    // Previously redirected to /api/auth/google?guest=1 which was wrong —
+    // the google route doesn't handle ?guest= param, so it always did Google OAuth.
+    try {
+      const resp = await fetch('/api/auth/guest', { method: 'POST' });
+      const data = await resp.json();
+      if (resp.ok && data.token) {
+        // Set the token in auth store
+        window.location.href = `/?google_login=${data.token}&google_name=${encodeURIComponent(data.user?.name || 'زائر')}`;
+      } else {
+        console.error('Guest login failed:', data.error);
+      }
+    } catch (err) {
+      console.error('Guest login error:', err);
+    }
   };
 
   const canSubmit =

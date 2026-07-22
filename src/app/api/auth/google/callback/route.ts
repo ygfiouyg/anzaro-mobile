@@ -89,6 +89,33 @@ export async function GET(request: NextRequest) {
     });
     console.log('[Google Auth] User ready:', email);
 
+    // V.45: Store Google tokens in UserIntegration for Drive uploads
+    // This lets the app upload files to the USER's Google Drive (not the service account)
+    if (tokens.access_token) {
+      try {
+        await db.userIntegration.upsert({
+          where: { userId_provider: { userId: user.id, provider: 'google' } },
+          create: {
+            userId: user.id,
+            provider: 'google',
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token || null,
+            tokenExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
+            scope: tokens.scope || 'email profile drive.file',
+          },
+          update: {
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token || null,
+            tokenExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
+            scope: tokens.scope || 'email profile drive.file',
+          },
+        });
+        console.log('[Google Auth] Tokens stored for Drive access');
+      } catch (dbErr) {
+        console.warn('[Google Auth] Failed to store tokens:', dbErr);
+      }
+    }
+
     // 4. Create session
     const sessionToken = generateToken();
     const expiresAt = new Date();

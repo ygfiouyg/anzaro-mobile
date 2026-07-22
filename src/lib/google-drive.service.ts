@@ -1066,12 +1066,21 @@ export interface DriveUploadResult {
 export async function uploadFileToDrive(
   filePath: string,
   fileName?: string,
-  mimeType: string = 'application/octet-stream'
+  mimeType: string = 'application/octet-stream',
+  userAccessToken?: string // V.45: If provided, upload to user's Drive instead of service account
 ): Promise<DriveUploadResult> {
   try {
-    const drive = await getWriteDriveClient();
     const name = fileName || filePath.split('/').pop() || 'upload';
 
+    // V.45: If user has a Google access token, upload to THEIR Drive
+    if (userAccessToken) {
+      console.log(`[Drive-Write] Uploading "${name}" to USER's Drive (OAuth token)`);
+      const buffer = await import('fs').then(fs => fs.readFileSync(filePath));
+      return uploadBufferWithUserToken(buffer, name, mimeType, userAccessToken);
+    }
+
+    // Fallback: use service account
+    const drive = await getWriteDriveClient();
     const response = await drive.files.create({
       requestBody: {
         name,
@@ -1087,7 +1096,7 @@ export async function uploadFileToDrive(
     const fileId = response.data.id || '';
     const webViewLink = response.data.webViewLink || '';
 
-    console.log(`[Drive-Write] ✓ Uploaded "${name}" (ID: ${fileId})`);
+    console.log(`[Drive-Write] ✓ Uploaded "${name}" to service account Drive (ID: ${fileId})`);
 
     return {
       success: true,
@@ -1102,6 +1111,56 @@ export async function uploadFileToDrive(
       success: false,
       error: errorMsg,
     };
+  }
+}
+
+/**
+ * V.45: Upload to user's Google Drive using their OAuth access token.
+ * Uses the Drive REST API directly (no service account needed).
+ */
+async function uploadBufferWithUserToken(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  accessToken: string
+): Promise<DriveUploadResult> {
+  try {
+    // Use Drive REST API with user's token — upload to user's root folder (no parents)
+    const boundary = 'anzaro_boundary_' + Date.now();
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: fileName })}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+      buffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': body.length.toString(),
+      },
+      body,
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Drive API ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const data = await resp.json();
+    console.log(`[Drive-Write] ✓ Uploaded "${fileName}" to USER's Drive (ID: ${data.id})`);
+
+    return {
+      success: true,
+      fileId: data.id || '',
+      fileName,
+      webViewLink: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view`,
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('[Drive-Write] User token upload error:', errorMsg);
+    return { success: false, error: errorMsg };
   }
 }
 
