@@ -141,7 +141,8 @@ export async function POST(request: NextRequest) {
     // V.45: User explicitly requested NO ZAI — Gemini is the best free option
     if (isGeminiASRAvailable()) {
       try {
-        const text = await transcribeWithGemini(audioBuffer, language);
+        const audioMime = audioFile.type || 'audio/webm';
+        const text = await transcribeWithGemini(audioBuffer, language, audioMime);
         if (text && text.trim()) {
           traceAPI(`ASR: Gemini نجح (${text.length} حرف)`);
           return NextResponse.json({
