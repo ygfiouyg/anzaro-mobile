@@ -185,6 +185,8 @@ export function ChatInput() {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  // V.48: Separate state for PDF upload — don't reuse isTranscribing (blocks send button)
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   // Google connection state (من NextAuth session)
   const { data: session, status: sessionStatus } = useSession();
   const googleConnected = sessionStatus === 'authenticated' && !!session?.accessToken && (session.user as any)?.provider === 'google';
@@ -529,10 +531,15 @@ export function ChatInput() {
       const pdfRefs = new Map<string, string>();
       const largePdfs = attachments.filter(a => a.category === 'pdf' && a.file && a.file.size >= 500 * 1024);
       if (largePdfs.length > 0) {
-        await Promise.all(largePdfs.map(async (att) => {
-          const ref = await uploadPdfSeparately(att);
-          if (ref) pdfRefs.set(att.id, ref);
-        }));
+        setIsUploadingPdf(true);
+        try {
+          await Promise.all(largePdfs.map(async (att) => {
+            const ref = await uploadPdfSeparately(att);
+            if (ref) pdfRefs.set(att.id, ref);
+          }));
+        } finally {
+          setIsUploadingPdf(false);
+        }
       }
 
       // Build message content with actual file content
@@ -688,15 +695,15 @@ export function ChatInput() {
     const pdfRefs = new Map<string, string>();
     const largePdfs = attachments.filter(a => a.category === 'pdf' && a.file && a.file.size >= 500 * 1024);
     if (largePdfs.length > 0) {
-      // Show loading state
-      setIsTranscribing(true);
+      // V.48: Use isUploadingPdf (not isTranscribing) so send button isn't blocked
+      setIsUploadingPdf(true);
       try {
         await Promise.all(largePdfs.map(async (att) => {
           const ref = await uploadPdfSeparately(att);
           if (ref) pdfRefs.set(att.id, ref);
         }));
       } finally {
-        setIsTranscribing(false);
+        setIsUploadingPdf(false);
       }
     }
 
@@ -1329,15 +1336,16 @@ export function ChatInput() {
             </motion.button>
           ) : isStreaming ? (
             <button
+              type="button"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 stopStreaming();
               }}
-              className="flex-shrink-0 p-2 rounded-lg transition-all duration-200 min-h-[40px] min-w-[40px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-lg animate-pulse z-50"
+              className="!flex-shrink-0 p-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-xl z-50 relative"
+              style={{ minHeight: '44px', minWidth: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               aria-label="إيقاف الرد"
               title="إيقاف الرد"
-              
             >
               <X className="size-5" />
             </button>

@@ -105,21 +105,12 @@ export function IntegrationDashboard() {
 
   const handleConnect = (id: string) => {
     setPending(id);
-    // V.47: Use our custom /api/auth/google route for Google (saves tokens in DB)
-    if (id === 'google') {
-      window.location.assign('/api/auth/google');
-    } else {
-      void signIn(id, { callbackUrl: '/' });
-    }
+    // V.48: Use NextAuth signIn — this is what works for Google Drive/Sheets/Tasks
+    void signIn(id, { callbackUrl: '/' });
   };
   const handleDisconnect = () => {
     setPending('disconnect');
-    // V.47: For Google, just reload — the session cookie will be checked
-    if (connectedId === 'google') {
-      window.location.assign('/?google_disconnect=1');
-    } else {
-      void signOut({ callbackUrl: '/', redirect: true });
-    }
+    void signOut({ callbackUrl: '/', redirect: true });
   };
 
   const filtered = useMemo(() => {
