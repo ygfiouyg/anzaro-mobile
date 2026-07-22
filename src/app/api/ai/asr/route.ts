@@ -141,7 +141,24 @@ export async function POST(request: NextRequest) {
     // V.45: User explicitly requested NO ZAI — Gemini is the best free option
     if (isGeminiASRAvailable()) {
       try {
-        const audioMime = audioFile.type || 'audio/webm';
+        // V.45d: Detect MIME type from file extension if not provided
+        // curl sends application/octet-stream which Gemini can't handle
+        let audioMime = audioFile.type;
+        if (!audioMime || audioMime === 'application/octet-stream') {
+          const ext = audioFile.name?.split('.').pop()?.toLowerCase() || '';
+          const mimeMap: Record<string, string> = {
+            'webm': 'audio/webm',
+            'wav': 'audio/wav',
+            'mp3': 'audio/mp3',
+            'mp4': 'audio/mp4',
+            'm4a': 'audio/mp4',
+            'ogg': 'audio/ogg',
+            'flac': 'audio/flac',
+            'aac': 'audio/aac',
+          };
+          audioMime = mimeMap[ext] || 'audio/webm';
+          console.log(`[ASR] Detected MIME from extension .${ext}: ${audioMime}`);
+        }
         const text = await transcribeWithGemini(audioBuffer, language, audioMime);
         if (text && text.trim()) {
           traceAPI(`ASR: Gemini نجح (${text.length} حرف)`);
