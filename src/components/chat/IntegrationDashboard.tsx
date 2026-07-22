@@ -105,30 +105,13 @@ export function IntegrationDashboard() {
 
   const handleConnect = (id: string) => {
     setPending(id);
-    // V.49: Use NextAuth signIn with redirect:false to stay on the same page
-    // This prevents the app from reloading and losing the app session
-    void signIn(id, { callbackUrl: window.location.href, redirect: false })
-      .then((result) => {
-        if (result?.error) {
-          console.error('[IntegrationDashboard] signIn error:', result.error);
-        } else if (result?.url) {
-          // Redirect to Google OAuth manually
-          window.location.assign(result.url);
-        }
-      })
-      .catch((err) => {
-        console.error('[IntegrationDashboard] signIn failed:', err);
-      });
+    // V.50: Use NextAuth signIn with redirect to current page
+    // This goes directly to Google OAuth (not the NextAuth signin page)
+    void signIn(id, { callbackUrl: window.location.href });
   };
   const handleDisconnect = () => {
     setPending('disconnect');
-    void signOut({ callbackUrl: window.location.href, redirect: false })
-      .then(() => {
-        window.location.reload();
-      })
-      .catch((err) => {
-        console.error('[IntegrationDashboard] signOut failed:', err);
-      });
+    void signOut({ callbackUrl: window.location.href });
   };
 
   const filtered = useMemo(() => {

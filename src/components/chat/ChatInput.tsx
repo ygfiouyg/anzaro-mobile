@@ -1334,33 +1334,19 @@ export function ChatInput() {
                 <Sparkles className="size-4" />
               )}
             </motion.button>
-          ) : isStreaming ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                stopStreaming();
-              }}
-              className="!flex-shrink-0 p-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-xl z-50 relative"
-              style={{ minHeight: '44px', minWidth: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="إيقاف الرد"
-              title="إيقاف الرد"
-            >
-              <X className="size-5" />
-            </button>
           ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={!hasContent || isBatchProcessing || isTranscribing || anyAttachmentLoading}
-              className={cn(
-                'flex-shrink-0 p-1.5 rounded-lg transition-all duration-200 min-h-[36px] min-w-[36px] flex items-center justify-center',
-                hasContent && !isBatchProcessing && !isTranscribing && !anyAttachmentLoading
-                  ? 'bg-emerald-600 dark:bg-emerald-500 text-white dark:text-black hover:bg-emerald-700 dark:hover:bg-emerald-600 shadow-md'
-                  : 'bg-muted text-muted-foreground cursor-not-allowed'
-              )}
-              aria-label="إرسال"
-            >
+              {/* V.50: Always show send button — sendMessage handles aborting previous stream */}
+              <button
+                onClick={handleSubmit}
+                disabled={!hasContent || isBatchProcessing || isTranscribing || anyAttachmentLoading}
+                className={cn(
+                  'flex-shrink-0 p-1.5 rounded-lg transition-all duration-200 min-h-[36px] min-w-[36px] flex items-center justify-center',
+                  hasContent && !isBatchProcessing && !isTranscribing && !anyAttachmentLoading
+                    ? 'bg-emerald-600 dark:bg-emerald-500 text-white dark:text-black hover:bg-emerald-700 dark:hover:bg-emerald-600 shadow-md'
+                    : 'bg-muted text-muted-foreground cursor-not-allowed'
+                )}
+                aria-label="إرسال"
+              >
               {anyAttachmentLoading ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
