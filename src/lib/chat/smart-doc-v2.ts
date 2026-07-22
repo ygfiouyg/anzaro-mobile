@@ -308,7 +308,7 @@ async function routeExtractTopic(
   }
 
   for (const [fileName, matches] of byFile) {
-    markdown += `### ${fileName}\n\n`;
+    markdown += `### ${sanitizeFileName(fileName)}\n\n`;
     for (const match of matches) {
       if (match.sectionTitle) {
         markdown += `**${match.sectionTitle}**\n\n`;
@@ -349,9 +349,10 @@ async function routeSummarize(
 
   // Per-file sections — structured as a full analysis
   for (const fileSummary of result.perFile) {
+    const cleanName = sanitizeFileName(fileSummary.fileName);
     markdown += language === 'en'
-      ? `## 📄 ${fileSummary.fileName}\n\n`
-      : `## 📄 ${fileSummary.fileName}\n\n`;
+      ? `## 📄 ${cleanName}\n\n`
+      : `## 📄 ${cleanName}\n\n`;
 
     markdown += language === 'en'
       ? `### 📝 Analysis\n\n`
@@ -532,7 +533,7 @@ Content formatting:
       : `## Lecture Comparison\n\n`;
     for (const file of files) {
       if (!file.content || file.content.trim().length === 0) continue;
-      fallback += `### ${file.name}\n\n`;
+      fallback += `### ${sanitizeFileName(file.name)}\n\n`;
       fallback += `${file.content.substring(0, 2000)}\n\n`;
     }
     onProgress?.('processing', 60, 'تم المقارنة (نسخة مبسطة)', undefined);
@@ -622,7 +623,7 @@ Write in English. Create at least 10 flashcards.`;
       : `## Review Flashcards\n\n`;
     for (const file of files) {
       if (!file.content || file.content.trim().length === 0) continue;
-      fallback += `### ${file.name}\n\n`;
+      fallback += `### ${sanitizeFileName(file.name)}\n\n`;
       // Create a few basic flashcards from the first lines
       const lines = file.content.split('\n').filter((l) => l.trim().length > 20).slice(0, 5);
       for (let idx = 0; idx < lines.length; idx++) {
@@ -942,6 +943,7 @@ async function executePipeline(
   // ── Step 3: Route based on intent type ────────────────────────────────────
   let content: string;
   let docTitle: string;
+  // V.53: All titles will be sanitized before use
 
   try {
     switch (intent.type) {
@@ -1016,9 +1018,11 @@ async function executePipeline(
   let pdfResult: { filePath: string; fileName: string; fileUrl: string };
 
   try {
+    // V.53: Sanitize the title before PDF generation
+    const cleanDocTitle = sanitizeTitle(docTitle);
     pdfResult = await generatePDFFromContent(
       content,
-      docTitle,
+      cleanDocTitle,
       language,
       input.channelName,
       filesWithContent.length,
@@ -1062,4 +1066,36 @@ async function executePipeline(
     durationMs,
     intent: intent.type,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V.53: Metadata Sanitization — clean file names and titles
+// ═══════════════════════════════════════════════════════════════════════════
+// Prevents garbage like "Lec 2.pdf (8).pdf", "0 100000000", hex values
+// from appearing in PDF headers and section titles.
+
+function sanitizeTitle(title: string): string {
+  if (!title) return 'مستند';
+  let cleaned = title;
+  // Remove file extensions
+  cleaned = cleaned.replace(/\.(pdf|docx?|txt|html?|csv|xlsx?)$/gi, '');
+  // Remove "(N)" patterns like "(8)" or "(1)"
+  cleaned = cleaned.replace(/\s*\(\d+\)\s*/g, ' ');
+  // Remove duplicate extensions like "Lec 1.pdf.pdf"
+  cleaned = cleaned.replace(/(\.\w+)\1+/g, '$1');
+  // Remove hex/garbage patterns like "0 100000000"
+  cleaned = cleaned.replace(/\b\d{6,}\b/g, '');
+  // Remove URLs
+  cleaned = cleaned.replace(/https?:\/\/\S+/g, '');
+  // Remove base64 fragments
+  cleaned = cleaned.replace(/[A-Za-z0-9+/=]{40,}/g, '');
+  // Collapse multiple spaces
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // Limit length
+  if (cleaned.length > 100) cleaned = cleaned.substring(0, 100).trim();
+  return cleaned || 'مستند';
+}
+
+function sanitizeFileName(name: string): string {
+  return sanitizeTitle(name);
 }

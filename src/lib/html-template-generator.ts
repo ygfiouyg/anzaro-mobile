@@ -1331,15 +1331,47 @@ function generateCSS(designReasoning?: DesignReasoningBlock, language: 'ar' | 'e
       font-weight: 500;
     }
 
-    /* Chart SVG container */
+    /* Chart SVG container — V.53: prevent orphaned charts */
     .chart-container {
       margin: 20px 0;
       text-align: center;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .chart-container svg {
       max-width: 100%;
       height: auto;
+    }
+
+    /* V.53: Tables, callouts, and code blocks must not break across pages */
+    .table-container, table {
+      page-break-inside: avoid;
+      break-inside: avoid;
+      margin-bottom: 1.5rem;
+    }
+
+    .callout, .callout-box, .note-box, .warning-box, .tip-box, .feature-box {
+      page-break-inside: avoid;
+      break-inside: avoid;
+      margin-bottom: 1.5rem;
+    }
+
+    pre, code-block, .code-block {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    /* V.53: Headings must not be orphaned at bottom of page */
+    h1, h2, h3, h4 {
+      page-break-after: avoid;
+      break-after: avoid;
+    }
+
+    /* V.53: Paragraphs should not break mid-sentence if possible */
+    p {
+      orphans: 3;
+      widows: 3;
     }
 
     /* ─── Grid Cards — 2-column grid ─────────── */
