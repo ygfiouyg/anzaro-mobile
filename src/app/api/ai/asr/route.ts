@@ -3,6 +3,7 @@ import { extractBearerToken, getUserFromToken } from '@/lib/auth';
 import { traceAPI, traceError } from '@/lib/trace-logger';
 import { GROQ_API_KEY } from '@/lib/groq';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { transcribeAudio as hfTranscribe } from '@/lib/hf-asr.service';
 
 // ZAI SDK Singleton (fallback)
 let zaiClient: any = null;
@@ -87,12 +88,35 @@ export async function POST(request: NextRequest) {
       const errBody = await groqResponse.text().catch(() => '');
       console.warn(`[ASR] Groq Whisper failed (${groqResponse.status}): ${errBody.slice(0, 200)}`);
     } catch (groqErr) {
-      console.warn('[ASR] Groq Whisper error, falling back to ZAI:', groqErr instanceof Error ? groqErr.message : String(groqErr));
+      console.warn('[ASR] Groq Whisper error, falling back to HF:', groqErr instanceof Error ? groqErr.message : String(groqErr));
     }
 
-    // ── FALLBACK: ZAI SDK ASR (~2s) ─────────────────────────────────
-    const arrayBuffer = await audioFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // ── FALLBACK 1: HuggingFace Whisper (high quality, free) ────────
+    // V.41: Added HF Whisper as first fallback — uses whisper-large-v3
+    // (most accurate) and distil-whisper (fast). This gives better quality
+    // than ZAI SDK ASR.
+    try {
+      const arrayBuffer = await audioFile.arrayBuffer();
+      const hfResult = await hfTranscribe({
+        audioData: arrayBuffer,
+        language,
+        provider: 'hf-whisper', // whisper-large-v3 (most accurate)
+      });
+      if (hfResult.text && hfResult.text.trim()) {
+        traceAPI(`ASR: HF Whisper نجح (${hfResult.text.length} حرف)`);
+        return NextResponse.json({
+          text: hfResult.text,
+          language,
+          provider: 'hf-whisper',
+        });
+      }
+    } catch (hfErr) {
+      console.warn('[ASR] HF Whisper failed, trying ZAI:', hfErr instanceof Error ? hfErr.message : String(hfErr));
+    }
+
+    // ── FALLBACK 2: ZAI SDK ASR (~2s) ───────────────────────────────
+    const zaiArrayBuffer = await audioFile.arrayBuffer();
+    const buffer = Buffer.from(zaiArrayBuffer);
     const base64Audio = buffer.toString('base64');
 
     // Determine MIME type
