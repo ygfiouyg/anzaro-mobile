@@ -1331,13 +1331,15 @@ export function ChatInput() {
             <button
               onClick={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 stopStreaming();
               }}
-              className="flex-shrink-0 p-1.5 rounded-lg transition-all duration-200 min-h-[36px] min-w-[36px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-md"
+              className="flex-shrink-0 p-2 rounded-lg transition-all duration-200 min-h-[40px] min-w-[40px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-lg animate-pulse"
               aria-label="إيقاف الرد"
               title="إيقاف الرد"
+              style={{ zIndex: 50 }}
             >
-              <X className="size-4" />
+              <X className="size-5" />
             </button>
           ) : (
             <button

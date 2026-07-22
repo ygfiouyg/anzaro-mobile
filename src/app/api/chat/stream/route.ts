@@ -3972,18 +3972,47 @@ ${toolData}${extraStr}
                   }
 
                   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                  // PDF GENERATION via Playwright (primary — best quality)
+                  // V.47: PDF GENERATION via Omni-Orchestrator (primary)
+                  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                  if (!fileName) {
+                    try {
+                      console.log('[Chat] File gen: Attempting Omni-Orchestrator PDF rendering...');
+                      const { renderHTMLToPDFAnzaro, isAnzaroPrinterAvailable } = await import('@/lib/pdf-engine/printer');
+                      const omniAvailable = await isAnzaroPrinterAvailable();
+                      if (omniAvailable) {
+                        const result = await renderHTMLToPDFAnzaro({
+                          html: htmlContent,
+                          title: docTitle,
+                          language: (language as 'ar' | 'en') || 'ar',
+                        });
+                        if (result.success && result.filePath) {
+                          const { readFileSync } = await import('fs');
+                          const pdfBuffer = readFileSync(result.filePath);
+                          fileName = `${fileBaseName}.pdf`;
+                          filePathSave = result.filePath;
+                          fileSize = pdfBuffer.length;
+                          fileType = 'pdf';
+                          fileUrl = `/api/pdf/serve/${encodeURIComponent(fileName)}`;
+                          console.log(`[Chat] File gen: ✅ Omni PDF created (${fileSize} bytes): ${fileName}`);
+                        } else {
+                          console.warn(`[Chat] File gen: ⚠️ Omni rendered but no file: ${result.error || 'Unknown'}`);
+                        }
+                      } else {
+                        console.warn('[Chat] File gen: ⚠️ Omni printer not available, trying Playwright...');
+                      }
+                    } catch (omniErr) {
+                      console.warn(`[Chat] File gen: ⚠️ Omni failed: ${omniErr instanceof Error ? omniErr.message : String(omniErr)}`);
+                    }
+                  }
+
+                  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                  // PDF GENERATION via Playwright (fallback)
                   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                   if (!fileName) {
                     try {
                       console.log('[Chat] File gen: Attempting Playwright PDF rendering...');
                       const { renderHTMLToPDF } = await import('@/lib/playwright-renderer');
-                      const result = await Promise.race([
-                        renderHTMLToPDF({ html: htmlContent, title: docTitle, language: (language as 'ar' | 'en') || 'ar' }),
-                        new Promise<{ success: false; error: string; duration: number }>((_, reject) =>
-                          setTimeout(() => reject(new Error('Playwright timeout (90s)')), 90_000)
-                        ),
-                      ]);
+                      const result = await renderHTMLToPDF({ html: htmlContent, title: docTitle, language: (language as 'ar' | 'en') || 'ar' });
 
                       if (result.success && result.pdfBuffer && result.pdfBuffer.length > 0) {
                         fileName = `${fileBaseName}.pdf`;
@@ -3992,9 +4021,9 @@ ${toolData}${extraStr}
                         fileSize = result.pdfBuffer.length;
                         fileType = 'pdf';
                         fileUrl = `/api/pdf/serve/${encodeURIComponent(fileName)}`;
-                        console.log(`[Chat] File gen: ✅ Playwright PDF created (${fileSize} bytes, ${result.duration}ms): ${fileName}`);
+                        console.log(`[Chat] File gen: ✅ Playwright PDF created (${fileSize} bytes): ${fileName}`);
                       } else {
-                        console.warn(`[Chat] File gen: ⚠️ Playwright rendered but no PDF buffer: ${result.error || 'Unknown'}`);
+                        console.warn(`[Chat] File gen: ⚠️ Playwright no PDF buffer: ${result.error || 'Unknown'}`);
                       }
                     } catch (playwrightErr) {
                       console.warn(`[Chat] File gen: ⚠️ Playwright failed: ${playwrightErr instanceof Error ? playwrightErr.message : String(playwrightErr)}`);

@@ -105,11 +105,21 @@ export function IntegrationDashboard() {
 
   const handleConnect = (id: string) => {
     setPending(id);
-    void signIn(id, { callbackUrl: '/' });
+    // V.47: Use our custom /api/auth/google route for Google (saves tokens in DB)
+    if (id === 'google') {
+      window.location.href = '/api/auth/google';
+    } else {
+      void signIn(id, { callbackUrl: '/' });
+    }
   };
   const handleDisconnect = () => {
     setPending('disconnect');
-    void signOut({ callbackUrl: '/', redirect: true });
+    // V.47: For Google, just reload — the session cookie will be checked
+    if (connectedId === 'google') {
+      window.location.href = '/?google_disconnect=1';
+    } else {
+      void signOut({ callbackUrl: '/', redirect: true });
+    }
   };
 
   const filtered = useMemo(() => {

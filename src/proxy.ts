@@ -67,8 +67,10 @@ export function proxy(request: NextRequest) {
   );
 
   // ── CSRF Protection: Validate Origin/Referer for state-changing requests ──
+  // V.47: Skip CSRF for auth routes — they have their own protection (tokens, cookies)
   const method = request.method.toUpperCase();
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+  const isAuthRoute = pathname.startsWith('/api/auth/');
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !isAuthRoute) {
     const origin = request.headers.get('Origin');
     const referer = request.headers.get('Referer');
     const host = request.headers.get('Host');
