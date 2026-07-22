@@ -737,7 +737,64 @@ async function generatePDFFromContent(
   fileCount?: number,
   onProgress?: ProgressCallback,
 ): Promise<{ filePath: string; fileName: string; fileUrl: string }> {
-  onProgress?.('designing', 70, 'جاري تصميم المستند...', 'AI design reasoning');
+  onProgress?.('designing', 70, 'جاري تصميم المستند...', 'Omni orchestrator');
+
+  // V.46: Use the Anzaro Omni-Orchestrator for PDF generation
+  // The user requested: "خلي الموديل يستخدمه ف انشاء الملفات"
+  try {
+    const { runAnzaroOrchestrator } = await import('@/lib/pdf-engine/anzaro-orchestrator');
+    const { enhanceAnzaroHTML } = await import('@/lib/pdf-engine/anzaro-designer');
+    const { renderHTMLToPDFAnzaro, isAnzaroPrinterAvailable } = await import('@/lib/pdf-engine/printer');
+
+    const playwrightAvailable = await isAnzaroPrinterAvailable();
+    if (playwrightAvailable) {
+      onProgress?.('designing', 75, 'جاري تشغيل Omni Orchestrator...', 'Anzaro AI');
+
+      const omniInput = {
+        title,
+        topic: title,
+        description: content.slice(0, 5000),
+        userDocuments: [{ name: title, content: content.slice(0, 50000) }],
+        targetPages: 3,
+        language,
+        style: 'academic',
+      };
+
+      const orchestratorOutput = await runAnzaroOrchestrator(omniInput);
+      const finalHTML = enhanceAnzaroHTML(orchestratorOutput, omniInput);
+
+      onProgress?.('rendering', 85, 'جاري إنشاء ملف PDF...', 'Playwright (Omni)');
+
+      const printResult = await renderHTMLToPDFAnzaro({
+        html: finalHTML,
+        title,
+        language,
+      });
+
+      if (printResult.success && printResult.filePath) {
+        const safeName = title
+          .replace(/[^a-zA-Z0-9\u0600-\u06FF\s_-]/g, '')
+          .replace(/\s+/g, '_')
+          .substring(0, 60);
+        const fileName = `${safeName || 'smart_document'}.pdf`;
+        const pathFileName = basename(printResult.filePath);
+        const fileUrl = `/api/pdf/serve/${pathFileName}`;
+
+        onProgress?.('rendering', 90, 'تم إنشاء ملف PDF', printResult.filePath);
+
+        return {
+          filePath: printResult.filePath,
+          fileName,
+          fileUrl,
+        };
+      }
+    }
+  } catch (omniErr) {
+    console.warn('[SmartDocV2] Omni orchestrator failed, falling back to renderToPDF:', omniErr instanceof Error ? omniErr.message : String(omniErr));
+  }
+
+  // Fallback: use the original rendering pipeline
+  onProgress?.('designing', 75, 'جاري تصميم المستند...', 'rendering pipeline fallback');
 
   const renderRequest: RenderingRequest = {
     content,
