@@ -43,36 +43,58 @@ export async function transcribeWithGemini(
     ? 'اكتب النص اللي بتسمعه بالظبط. لو الكلام بالعامية المصرية، اكتبه بالعامية المصرية زي ما بيتقال. متحولش لفصحى.'
     : 'Transcribe the audio exactly as spoken.';
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-  const body = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        {
-          inline_data: {
-            mime_type: detectedMime,
-            data: base64Audio,
-          },
-        },
-      ],
-    }],
-    generationConfig: {
-      temperature: 0.0,
-      maxOutputTokens: 4096,
-    },
-  };
 
   console.log(`[Gemini-ASR] Transcribing: ${(audioBuffer.length / 1024).toFixed(1)}KB, language=${language}, mime=${detectedMime}`);
-  console.log(`[Gemini-ASR] Base64 size: ${(base64Audio.length / 1024).toFixed(1)}KB`);
-  console.log(`[Gemini-ASR] API URL: ${url.slice(0, 80)}...`);
+
+  // V.45f: For files > 1MB, use Gemini File API instead of inline_data
+  // Gemini inline_data returns 400 for large files.
+  // File API: upload file → get file URI → use in generateContent
+  let fileUri: string | null = null;
+  if (audioBuffer.length > 1024 * 1024) {
+    try {
+      console.log(`[Gemini-ASR] File > 1MB, using File API...`);
+      const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`;
+      const uploadResp = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Content-Type': detectedMime },
+        body: audioBuffer,
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (uploadResp.ok) {
+        const uploadData = await uploadResp.json();
+        fileUri = uploadData?.file?.uri || null;
+        console.log(`[Gemini-ASR] File uploaded: ${fileUri?.slice(0, 80)}`);
+      } else {
+        const errText = await uploadResp.text();
+        console.error(`[Gemini-ASR] File upload failed ${uploadResp.status}: ${errText.slice(0, 300)}`);
+      }
+    } catch (uploadErr) {
+      console.error(`[Gemini-ASR] File upload error:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr));
+    }
+  }
+
+  // Build request body — use fileUri if available, otherwise inline_data
+  const parts: any[] = [{ text: prompt }];
+  if (fileUri) {
+    parts.push({ file_data: { mime_type: detectedMime, file_uri: fileUri } });
+  } else {
+    parts.push({ inline_data: { mime_type: detectedMime, data: base64Audio } });
+  }
+
+  const requestBody = {
+    contents: [{ parts }],
+    generationConfig: { temperature: 0.0, maxOutputTokens: 4096 },
+  };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(60_000),
     });
   } catch (fetchErr) {
