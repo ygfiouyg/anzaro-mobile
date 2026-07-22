@@ -8,7 +8,7 @@
  */
 
 const GEMINI_API_KEY = process.env.GOOGLE_AI_KEY || process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = 'gemini-2.0-flash'; // Fast + supports audio
+const GEMINI_MODEL = 'gemini-1.5-flash'; // V.45j: Use 1.5-flash (more widely available)
 
 export function isGeminiASRAvailable(): boolean {
   return !!GEMINI_API_KEY;
@@ -94,7 +94,7 @@ export async function transcribeWithGemini(
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(60_000),
     });
