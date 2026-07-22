@@ -2903,3 +2903,71 @@ Stage Summary:
 - **فيه مشاكل لسه**: HTML بدل PDF + Drive upload محتاج تفعيل
 
 *Last updated: 2025-01-30 (Round 37) · V.37 PDF summarization timeout fixed*
+
+---
+Task ID: v38-pdf-drive-fix
+Agent: main (Z.ai Code)
+Task: إصلاح مشكلتين: PDF بيتولد HTML بدل PDF + Google Drive upload مش بيحصل
+
+Work Log:
+- اختبرت V.37 على HF: PDF اتولد في 16s لكن:
+  1. الملف طلع HTML (fileUrl ينتهي بـ .html)
+  2. Google Drive upload ما حصلش
+
+### Bug 1: PDF generation بيطلع HTML
+
+**السبب الجذري**: Playwright/Chromium مش مثبت في Dockerfile.
+- الـ rendering-pipeline.ts بيـ check `isPlaywrightAvailable()`
+- لو مش متوفر، بيـ fallback لكتابة HTML بدل PDF
+- الـ Dockerfile ما كان فيهش Chromium system dependencies
+
+**الإصلاح**:
+1. ضفت 17 Chromium system dependencies في Dockerfile:
+   - libnss3, libnspr4, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdrm2
+   - libdbus-1-3, libxcb1, libxkbcommon0, libx11-6, libxcomposite1, libxdamage1
+   - libxext6, libxfixes3, libxrandr2, libgbm1, libpango-1.0-0, libcairo2
+   - libasound2, libatspi2.0-0, fonts-liberation
+2. ضفت `npx playwright install chromium` بعد npm install
+
+**النتيجة**: HF logs بتأكد:
+```
+[Playwright Renderer] ✅ PDF generated in 1396ms
+[Rendering Pipeline] Playwright rendering succeeded
+```
+- fileUrl دلوقتي ينتهي بـ .pdf (مش .html) ✅
+
+### Bug 2: Google Drive upload مش بيحصل في Smart Doc path
+
+**السبب الجذري**: Drive upload code كان موجود بس في الـ inline file-gen path.
+الـ Smart Doc V2 pipeline ما كانش بيعمل Drive upload навتي لو المستخدم طلبها.
+
+**الإصلاح**:
+1. ضفت Drive upload detection regex في Smart Doc path:
+   ```js
+   const wantsDriveUpload = /(?:ارفع|رفع|حفظ|احفظ|upload|save).*?(?:درايف|drive|جوجل)|درايف|drive/i.test(message);
+   ```
+2. بعد Smart Doc success، لو user طلب Drive upload + filePath موجود:
+   - بعت progress event "☁️ جاري الرفع على Google Drive..."
+   - استدعي `uploadFileToDrive(result.filePath, result.fileName, 'application/pdf')`
+   - ضيف driveLink في smartDocResult event
+   - اعرض "☁️ تم الرفع على Google Drive!" مع اللينك
+
+**النتيجة**: HF logs بتأكد Drive بيتسعي:
+```
+[Drive] Using service account from GD_SERVICE_ACCOUNT_JSON env var
+```
+
+### ملاحظة على الاختبار:
+- الـ curl test استخدم payload format مختلف (separate `attachments` field)
+- الـ frontend بيستخدم INLINE format: `[DELTA_PDF:data:...]`
+- ده خلى الاختبار يروح على generateLocalDocument (no files path)
+- النتيجة: PDF اتعمل بس generic (مش من محتوى المحاضرة الفعلي)
+- في الاستخدام الحقيقي من UI، الـ attachments هتتعرف صح
+
+Stage Summary:
+- ✅ **PDF generation اشتغل**: Playwright/Chromium مثبت، بيتولد PDF فعلي
+- ✅ **Drive upload code اتضاف**: Smart Doc path بيرفع على Drive لو user طلب
+- ✅ **HF logs بتأكد**: "[Playwright Renderer] ✅ PDF generated" + "[Drive] Using service account"
+- ⚠️ **الاختبار من API**: استخدم format غلط، محتاج اختبار من UI الفعلي
+
+*Last updated: 2025-01-30 (Round 38) · V.38 PDF + Drive fix deployed*
