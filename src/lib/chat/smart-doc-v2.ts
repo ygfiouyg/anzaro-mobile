@@ -198,6 +198,21 @@ async function extractTextFromAttachments(
     let content = '';
     let extractionWarning = '';
 
+    // V.37: Start a periodic heartbeat during PDF extraction.
+    // PDF text extraction can take 10-30s. The HF proxy kills idle connections
+    // after ~10s. This interval sends a progress event every 5s to keep the
+    // connection alive.
+    let heartbeatElapsed = 0;
+    const heartbeatInterval = setInterval(() => {
+      heartbeatElapsed += 5;
+      onProgress?.(
+        'extracting',
+        8 + Math.min(heartbeatElapsed, 7), // 8-15%
+        `جاري استخراج النص من ${att.name}... (${heartbeatElapsed}s)`,
+        att.name,
+      );
+    }, 5_000);
+
     try {
       if (att.type === 'pdf' && att.content) {
         // PDF: use the extractor
@@ -240,6 +255,9 @@ async function extractTextFromAttachments(
     } catch (error) {
       console.error(`[SmartDocV2] Failed to extract text from "${att.name}":`, error);
       content = att.textContent || `[فشل استخراج المحتوى من: ${att.name}]`;
+    } finally {
+      // V.37: Always clear the heartbeat interval when extraction is done
+      clearInterval(heartbeatInterval);
     }
 
     const fileSize = parseInt(att.size) || content.length;
@@ -887,6 +905,12 @@ async function executePipeline(
         : 'لم يتم توفير مرفقات لإنشاء المستند',
     };
   }
+
+  // V.37: Send a heartbeat RIGHT BEFORE extraction starts.
+  // PDF text extraction can take 10-30s for a 53-page file. During this time,
+  // no progress events are sent. The HF proxy kills idle connections after
+  // ~10s. This heartbeat ensures the proxy sees activity.
+  onProgress?.('extracting', 8, language === 'en' ? 'Starting text extraction...' : 'جاري بدء استخراج النص...', undefined);
 
   const files = await extractTextFromAttachments(input.attachments, onProgress);
 

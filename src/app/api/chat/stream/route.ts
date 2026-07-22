@@ -851,14 +851,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Build messages array for LLM with multimodal support
-    const messages = await buildLLMMessages(
-      systemPrompt,
-      conversationMessages,
-      message,
-      parsed,
-      modelConfig.glmModel,
-      modelConfig
-    );
+    // V.37 FIX: Skip buildLLMMessages when hasEnhancedDocIntent is true.
+    // buildLLMMessages calls extractPdfWithVlmAndText() which takes 40-90s
+    // for a 53-page PDF. During this time, NO HTTP response has started →
+    // the HF proxy kills the connection after ~10s idle → timeout.
+    // The Smart Doc V2 pipeline does its OWN text extraction, so we don't
+    // need buildLLMMessages for that path.
+    const messages = hasEnhancedDocIntent
+      ? []  // Smart Doc pipeline handles extraction itself
+      : await buildLLMMessages(
+          systemPrompt,
+          conversationMessages,
+          message,
+          parsed,
+          modelConfig.glmModel,
+          modelConfig
+        );
 
     // Get GLM model
     const glmModel = modelConfig.glmModel;
