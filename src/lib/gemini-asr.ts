@@ -128,3 +128,21 @@ export async function transcribeWithGemini(
   console.log(`[Gemini-ASR] Success: "${text.slice(0, 80)}" (${text.length} chars)`);
   return text.trim();
 }
+
+// V.45k: Debug function to test Gemini API directly
+export async function testGeminiConnection(): Promise<string> {
+  const testBody = {
+    contents: [{ parts: [{ text: 'Hello' }] }],
+    generationConfig: { temperature: 0.0, maxOutputTokens: 100 },
+  };
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+    body: JSON.stringify(testBody),
+  });
+  
+  const text = await resp.text();
+  return `Status: ${resp.status}, Body: ${text.slice(0, 500)}`;
+}
