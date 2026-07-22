@@ -64,8 +64,11 @@ async function transcribeWithHF(
       body: new Uint8Array(buffer),
     });
 
+    console.log(`[HF-ASR] Response: status=${response.status}, ok=${response.ok}`);
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
+      console.warn(`[HF-ASR] Error ${response.status}: ${errorText.slice(0, 300)}`);
 
       // Cold start — wait and retry (V.42: increased wait from 20s to 30s)
       if (response.status === 503 && (errorText.includes('loading') || errorText.includes('currently loading'))) {
@@ -192,6 +195,7 @@ export async function transcribeAudio(request: ASRRequest): Promise<ASRResponse>
       if (text && text.trim()) {
         return { text: text.trim(), provider: p, language };
       }
+      console.warn(`[ASR] Provider ${p} returned empty text`);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.warn(`[ASR] Provider ${p} failed:`, lastError.message);
