@@ -549,7 +549,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse file attachments from the message
-    const parsed = parseFileAttachments(message);
+    const parsed = await parseFileAttachments(message);
 
     // ── Vision Tools Integration ──
     // لو فيه صور مرفقة، شغّل أداة vision قبل GLM

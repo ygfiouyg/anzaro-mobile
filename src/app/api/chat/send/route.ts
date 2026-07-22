@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse file attachments from the message
-    const parsed = parseFileAttachments(message);
+    const parsed = await parseFileAttachments(message);
 
     // Optional auth — guest mode if no token
     const authHeader = request.headers.get('authorization');

@@ -16,11 +16,11 @@ export interface ParsedAttachment {
  * - [DELTA_DOCX:data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,...] for DOCX (Word)
  * - 📎 ملف مرفق: ... / --- محتوى الملف --- / --- نهاية الملف --- for text files
  */
-export function parseFileAttachments(message: string): {
+export async function parseFileAttachments(message: string): Promise<{
   cleanedMessage: string;
   attachments: ParsedAttachment[];
   hasAttachments: boolean;
-} {
+}> {
   const attachments: ParsedAttachment[] = [];
   let cleanedMessage = message;
 
@@ -73,11 +73,11 @@ export function parseFileAttachments(message: string): {
     const [, fileId, fileName, fileSize] = match;
     // Read the PDF from disk
     try {
-      const { readFileSync, existsSync } = require('fs');
-      const { join } = require('path');
-      const filePath = join(process.cwd(), 'upload-temp', `${fileId}.pdf`);
-      if (existsSync(filePath)) {
-        const buffer = readFileSync(filePath);
+      const fs = await import('fs');
+      const path = await import('path');
+      const filePath = path.join(process.cwd(), 'upload-temp', `${fileId}.pdf`);
+      if (fs.existsSync(filePath)) {
+        const buffer = fs.readFileSync(filePath);
         const base64 = buffer.toString('base64');
         const dataUrl = `data:application/pdf;base64,${base64}`;
         attachments.push({
