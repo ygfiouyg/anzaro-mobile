@@ -64,22 +64,41 @@ export async function transcribeWithGemini(
   };
 
   console.log(`[Gemini-ASR] Transcribing: ${(audioBuffer.length / 1024).toFixed(1)}KB, language=${language}, mime=${detectedMime}`);
+  console.log(`[Gemini-ASR] Base64 size: ${(base64Audio.length / 1024).toFixed(1)}KB`);
+  console.log(`[Gemini-ASR] API URL: ${url.slice(0, 80)}...`);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (fetchErr) {
+    console.error(`[Gemini-ASR] Fetch failed:`, fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
+    throw new Error(`Gemini fetch failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
+  }
+
+  console.log(`[Gemini-ASR] Response status: ${response.status}`);
 
   if (!response.ok) {
     const errText = await response.text();
-    console.error(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 300)}`);
+    console.error(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 500)}`);
     throw new Error(`Gemini ASR error ${response.status}: ${errText.slice(0, 200)}`);
   }
 
   const data = await response.json();
-  console.log(`[Gemini-ASR] Response:`, JSON.stringify(data).slice(0, 300));
+  console.log(`[Gemini-ASR] Response body:`, JSON.stringify(data).slice(0, 500));
+  
+  // Check for safety blocks or empty responses
+  if (!data?.candidates?.[0]) {
+    console.error(`[Gemini-ASR] No candidates in response. Full response:`, JSON.stringify(data).slice(0, 500));
+    if (data?.promptFeedback?.blockReason) {
+      throw new Error(`Gemini blocked: ${data.promptFeedback.blockReason}`);
+    }
+    return '';
+  }
   
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   
