@@ -89,6 +89,7 @@ export async function transcribeWithGemini(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
+  console.log(`[Gemini-ASR] Request body:`, JSON.stringify(requestBody).slice(0, 500));
   let response: Response;
   try {
     response = await fetch(url, {
