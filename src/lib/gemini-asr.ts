@@ -67,7 +67,7 @@ export async function transcribeWithGemini(
         console.log(`[Gemini-ASR] File uploaded: ${fileUri?.slice(0, 80)}`);
       } else {
         const errText = await uploadResp.text();
-        console.log(`[Gemini-ASR] File upload failed ${uploadResp.status}: ${errText.slice(0, 300)}`);
+        console.log(`[Gemini-ASR] File upload failed ${uploadResp.status}: ${errText.slice(0, 1000)}`);
       }
     } catch (uploadErr) {
       console.log(`[Gemini-ASR] File upload error:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr));
@@ -106,7 +106,7 @@ export async function transcribeWithGemini(
 
   if (!response.ok) {
     const errText = await response.text();
-    console.log(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 500)}`);
+    console.log(`[Gemini-ASR] Error ${response.status}: ${errText.slice(0, 1000)}`);
     throw new Error(`Gemini ASR error ${response.status}: ${errText.slice(0, 200)}`);
   }
 
