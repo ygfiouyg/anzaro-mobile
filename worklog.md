@@ -3445,3 +3445,44 @@ Stage Summary:
 - ⚠️ **PDF file creation**: فيه مشكلة بسيطة في إنشاء الملف (button متاح للإعادة)
 
 *Last updated: 2025-01-30 (Round 44) · V.44 PDF upload fix verified from UI*
+
+---
+Task ID: v45-v46-batch-fixes
+Agent: main (Z.ai Code)
+Task: Google OAuth + Guest login + Drive user account + Gemini ASR + Omni PDF
+
+### V.45: Google OAuth + Guest login + Drive
+1. **Guest login fix**: زرار "زائر سريع" كان بيروح لـ Google OAuth بالغلط
+   - إصلاح: handleGuest() دلوقتي بينادي /api/auth/guest POST
+   - إصلاح: /api/auth/guest/route.ts كان بيـ import functions مش موجودة
+   - إصلاح: استخدام db + generateToken مباشرة
+
+2. **Google OAuth + Drive scope**:
+   - ضفت drive.file scope للـ OAuth
+   - الـ callback بيسيف access_token + refresh_token في UserIntegration
+   - ده يخلي التطبيق يرفع ملفات على Drive بتاع المستخدم
+
+3. **Drive upload for user's account**:
+   - uploadFileToDrive() بيقبل userAccessToken اختياري
+   - لما يتوفر، بيرفع على Drive بتاع المستخدم (مش service account)
+   - Chat stream route بيقرأ الـ token من UserIntegration
+
+### V.45b/c: Gemini ASR
+- Created src/lib/gemini-asr.ts
+- ASR route: Gemini (PRIMARY) → distil-whisper → whisper-large-v3
+- مش عاوزين ZAI (شركة صينية وحشة في العربي)
+- مش عاوزين Groq
+- Gemini بيستخدم GOOGLE_AI_KEY (موجود على HF Space)
+
+### V.46: Omni-Orchestrator for PDF generation
+- Smart Doc بقى يستخدم Anzaro Omni-Orchestrator لإنشاء PDF
+- Flow: runAnzaroOrchestrator → enhanceAnzaroHTML → renderHTMLToPDFAnzaro
+- Fallback لـ renderToPDF لو Omni فشل
+
+### Verification:
+- ✅ Guest login: HTTP 200 + token returned
+- ✅ Chat: glm-4-flash-zai بيرد
+- ⚠️ ASR: Gemini اشتغل بس رجع نص فاضي (محتاج تشخيص أكتر)
+- ⏳ Omni PDF: محتاج اختبار بعد الـ rebuild
+
+*Last updated: 2025-01-30 (Round 46) · V.45-V.46 batch fixes*
