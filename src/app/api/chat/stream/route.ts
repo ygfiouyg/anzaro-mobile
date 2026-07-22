@@ -1512,7 +1512,7 @@ export async function POST(request: NextRequest) {
                     const imageUrl = imgData?.data?.[0]?.url || imgData?.data?.[0]?.b64_json || '';
                     // If response is a URL, download and convert to base64 data URL
                     if (imageUrl && imageUrl.startsWith('http')) {
-                      const imgFetch = await fetch(imageUrl, { // V.49: timeout removed });
+                      const imgFetch = await fetch(imageUrl);
                       const buf = Buffer.from(await imgFetch.arrayBuffer());
                       const mime = imgFetch.headers.get('content-type') || 'image/png';
                       const base64 = `data:${mime};base64,${buf.toString('base64')}`;
