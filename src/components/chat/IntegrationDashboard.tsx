@@ -107,7 +107,7 @@ export function IntegrationDashboard() {
     setPending(id);
     // V.47: Use our custom /api/auth/google route for Google (saves tokens in DB)
     if (id === 'google') {
-      window.location.href = '/api/auth/google';
+      window.location.assign('/api/auth/google');
     } else {
       void signIn(id, { callbackUrl: '/' });
     }
@@ -116,7 +116,7 @@ export function IntegrationDashboard() {
     setPending('disconnect');
     // V.47: For Google, just reload — the session cookie will be checked
     if (connectedId === 'google') {
-      window.location.href = '/?google_disconnect=1';
+      window.location.assign('/?google_disconnect=1');
     } else {
       void signOut({ callbackUrl: '/', redirect: true });
     }

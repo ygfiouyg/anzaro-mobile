@@ -136,7 +136,7 @@ export function AuthScreen() {
   };
 
   const handleGoogle = () => {
-    window.location.href = '/api/auth/google';
+    window.location.assign('/api/auth/google');
   };
 
   const handleGuest = async () => {
