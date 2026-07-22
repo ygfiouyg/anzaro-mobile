@@ -1308,6 +1308,26 @@ export async function POST(request: NextRequest) {
                 });
 
                 if (result.success) {
+                  // V.38: Try Google Drive upload if user requested it
+                  // (e.g., "وارفعه علي جوجل درايف", "upload to drive")
+                  let driveLink: string | null = null;
+                  const wantsDriveUpload = /(?:ارفع|رفع|حفظ|احفظ|upload|save).*?(?:درايف|drive|جوجل)|درايف|drive/i.test(message);
+                  if (wantsDriveUpload && result.filePath) {
+                    try {
+                      controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify({ smartDocProgress: { stage: 'uploading', progress: 92, message: '☁️ جاري الرفع على Google Drive...' } })}\n\n`)
+                      );
+                      const { uploadFileToDrive } = await import('@/lib/google-drive.service');
+                      const uploadResult = await uploadFileToDrive(result.filePath, result.fileName, 'application/pdf');
+                      driveLink = uploadResult?.webViewLink || null;
+                      if (driveLink) {
+                        console.log(`[Chat] Smart Doc: Drive link: ${driveLink}`);
+                      }
+                    } catch (driveErr) {
+                      console.warn('[Chat] Smart Doc: Drive upload failed (non-critical):', driveErr instanceof Error ? driveErr.message : String(driveErr));
+                    }
+                  }
+
                   // Send completion event
                   controller.enqueue(
                     encoder.encode(`data: ${JSON.stringify({
@@ -1317,14 +1337,18 @@ export async function POST(request: NextRequest) {
                         fileName: result.fileName,
                         durationMs: result.durationMs,
                         docType: result.docType || 'pdf',
+                        driveLink,
                       }
                     })}\n\n`)
                   );
 
                   // Send text response
                   const topicInfo = docIntent!.topic ? ` عن "${docIntent!.topic}"` : '';
+                  const driveMsg = driveLink
+                    ? `\n\n☁️ **تم الرفع على Google Drive!**\n👉 [افتح على Drive](${driveLink})`
+                    : '';
                   controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ content: `✅ تم ${intentLabel}${topicInfo} بنجاح!\n\n📄 **${result.fileName}**\n⏱️ الوقت: ${Math.round((result.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${result.fileUrl})\n\nتم تحليل الملفات ${pipelineFiles.length} وإنشاء المستند المطلوب 🎨` })}\n\n`)
+                    encoder.encode(`data: ${JSON.stringify({ content: `✅ تم ${intentLabel}${topicInfo} بنجاح!\n\n📄 **${result.fileName}**\n⏱️ الوقت: ${Math.round((result.durationMs || 0) / 1000)} ثانية\n\n👉 [اضغط هنا لفتح المستند](${result.fileUrl})${driveMsg}\n\nتم تحليل الملفات ${pipelineFiles.length} وإنشاء المستند المطلوب 🎨` })}\n\n`)
                   );
 
                   // Save to DB

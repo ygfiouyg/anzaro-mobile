@@ -6,6 +6,9 @@
 FROM node:20-slim
 
 # Install system dependencies for sharp, bcrypt, prisma, ffmpeg
+# V.38: Added Playwright/Chromium system dependencies for PDF generation.
+# Without these, Playwright can't launch Chromium → falls back to HTML
+# instead of generating actual PDF files.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
@@ -13,6 +16,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     g++ \
     ffmpeg \
+    # Playwright/Chromium system dependencies (for PDF rendering)
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -30,6 +55,12 @@ RUN if [ -f bun.lock ]; then \
     else \
       npm install; \
     fi
+
+# V.38: Install Chromium browser for Playwright (PDF generation).
+# This downloads the Chromium binary (~150MB) that Playwright needs to
+# render HTML → PDF. Without this, PDF generation falls back to HTML.
+# Using --with-deps would re-install system deps we already installed above.
+RUN npx playwright install chromium 2>/dev/null || echo "Playwright Chromium install failed — PDF generation will use HTML fallback"
 
 # Generate Prisma client (V.27: must succeed — AudioRecord model needed)
 RUN npx prisma generate
