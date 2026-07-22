@@ -422,13 +422,42 @@ export function ChatInput() {
   }, []);
 
   // Build message content with actual file content embedded
-  const buildMessageWithAttachments = useCallback((userText: string, attachs: AttachedFile[]): string => {
+  // V.44: Upload large PDFs separately to avoid 5MB+ inline base64
+  const uploadPdfSeparately = useCallback(async (att: AttachedFile): Promise<string | null> => {
+    if (att.category !== 'pdf' || !att.file) return null;
+    // Only upload if > 500KB (smaller PDFs can go inline)
+    if (att.file.size < 500 * 1024) return null;
+
+    try {
+      const token = useAuthStore.getState().token;
+      const formData = new FormData();
+      formData.append('file', att.file);
+
+      const resp = await fetch('/api/chat/upload-pdf', {
+        method: 'POST',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: formData,
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        // Return a reference marker instead of the base64 data
+        return `[DELTA_PDF_REF:${data.fileId}:${data.fileName}:${data.fileSizeLabel}]`;
+      }
+    } catch (err) {
+      console.warn('[ChatInput] PDF upload failed, falling back to inline:', err);
+    }
+    return null;
+  }, []);
+
+  const buildMessageWithAttachments = useCallback((userText: string, attachs: AttachedFile[], pdfRefs?: Map<string, string>): string => {
     if (attachs.length === 0) return userText;
 
     const parts: string[] = [];
 
     for (const att of attachs) {
       const size = formatFileSize(att.file.size);
+      const ref = pdfRefs?.get(att.id);
 
       if (att.category === 'text' && att.content) {
         parts.push(`📎 ملف مرفق: ${att.file.name} (${size})`);
@@ -439,8 +468,14 @@ export function ChatInput() {
         parts.push(`📷 صورة مرفقة: ${att.file.name} (${size})`);
         parts.push(`[DELTA_IMAGE:${att.content}]`);
       } else if (att.category === 'pdf' && att.content) {
-        parts.push(`📄 ملف PDF مرفق: ${att.file.name} (${size})`);
-        parts.push(`[DELTA_PDF:${att.content}]`);
+        if (ref) {
+          // V.44: Use uploaded reference instead of inline base64
+          parts.push(`📄 ملف PDF مرفق: ${att.file.name} (${size})`);
+          parts.push(ref);
+        } else {
+          parts.push(`📄 ملف PDF مرفق: ${att.file.name} (${size})`);
+          parts.push(`[DELTA_PDF:${att.content}]`);
+        }
       } else if (att.category === 'docx' && att.content) {
         parts.push(`📄 ملف Word مرفق: ${att.file.name} (${size})`);
         parts.push(`[DELTA_DOCX:${att.content}]`);
@@ -490,8 +525,18 @@ export function ChatInput() {
     setIsManualSearching(true);
 
     try {
+      // V.44: Upload large PDFs separately
+      const pdfRefs = new Map<string, string>();
+      const largePdfs = attachments.filter(a => a.category === 'pdf' && a.file && a.file.size >= 500 * 1024);
+      if (largePdfs.length > 0) {
+        await Promise.all(largePdfs.map(async (att) => {
+          const ref = await uploadPdfSeparately(att);
+          if (ref) pdfRefs.set(att.id, ref);
+        }));
+      }
+
       // Build message content with actual file content
-      const messageContent = buildMessageWithAttachments(trimmed, attachments);
+      const messageContent = buildMessageWithAttachments(trimmed, attachments, pdfRefs);
 
       setValue('');
       setAttachments([]);
@@ -639,8 +684,24 @@ export function ChatInput() {
     const hasQuizIntentDetected = isQuizIntent(trimmed);
     const quizTopic = hasQuizIntentDetected ? extractTopicFromMessage(trimmed) : null;
 
-    // Build message content with actual file content
-    const messageContent = buildMessageWithAttachments(trimmed, attachments);
+    // V.44: Upload large PDFs separately before building message
+    const pdfRefs = new Map<string, string>();
+    const largePdfs = attachments.filter(a => a.category === 'pdf' && a.file && a.file.size >= 500 * 1024);
+    if (largePdfs.length > 0) {
+      // Show loading state
+      setIsTranscribing(true);
+      try {
+        await Promise.all(largePdfs.map(async (att) => {
+          const ref = await uploadPdfSeparately(att);
+          if (ref) pdfRefs.set(att.id, ref);
+        }));
+      } finally {
+        setIsTranscribing(false);
+      }
+    }
+
+    // Build message content with actual file content (using refs for large PDFs)
+    const messageContent = buildMessageWithAttachments(trimmed, attachments, pdfRefs);
 
     setValue('');
     setAttachments([]);

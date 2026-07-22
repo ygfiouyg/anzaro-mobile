@@ -64,6 +64,39 @@ export function parseFileAttachments(message: string): {
     cleanedMessage = cleanedMessage.replace(match[0], '[📄 PDF: ' + match[1] + ']');
   }
 
+  // V.44: Extract PDF REFERENCE attachments: [DELTA_PDF_REF:fileId:filename:size]
+  // These are uploaded separately via /api/chat/upload-pdf to avoid
+  // sending 5MB+ base64 inline in the chat request.
+  const pdfRefRegex = /\[DELTA_PDF_REF:([^:]+):([^:]+):([^\]]+)\]/g;
+  while ((match = pdfRefRegex.exec(message)) !== null) {
+    if (match[0].length === 0) { pdfRefRegex.lastIndex++; continue; }
+    const [, fileId, fileName, fileSize] = match;
+    // Read the PDF from disk
+    try {
+      const { readFileSync, existsSync } = require('fs');
+      const { join } = require('path');
+      const filePath = join(process.cwd(), 'upload-temp', `${fileId}.pdf`);
+      if (existsSync(filePath)) {
+        const buffer = readFileSync(filePath);
+        const base64 = buffer.toString('base64');
+        const dataUrl = `data:application/pdf;base64,${base64}`;
+        attachments.push({
+          type: 'pdf',
+          name: fileName,
+          size: fileSize,
+          content: dataUrl,
+        });
+        console.log(`[AttachmentParser] Loaded PDF ref ${fileId} (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
+      } else {
+        console.warn(`[AttachmentParser] PDF ref ${fileId} not found at ${filePath}`);
+      }
+    } catch (err) {
+      console.error(`[AttachmentParser] Error loading PDF ref ${fileId}:`, err);
+    }
+    // Remove from cleaned message
+    cleanedMessage = cleanedMessage.replace(match[0], `[📄 PDF: ${fileName}]`);
+  }
+
   // Extract DOCX (Word) attachments: [DELTA_DOCX:data:application/vnd.openxmlformats...;base64,...]
   const docxRegex = /📄 ملف Word مرفق: (.+?) \((.+?)\)\n\[DELTA_DOCX:(data:application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document;base64,[^\]]+)\]/g;
   while ((match = docxRegex.exec(message)) !== null) {
