@@ -1335,7 +1335,6 @@ export function ChatInput() {
               )}
             </motion.button>
           ) : (
-              {/* V.50: Always show send button — sendMessage handles aborting previous stream */}
               <button
                 onClick={handleSubmit}
                 disabled={!hasContent || isBatchProcessing || isTranscribing || anyAttachmentLoading}
