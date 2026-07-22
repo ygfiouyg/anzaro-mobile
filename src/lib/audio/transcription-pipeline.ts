@@ -107,46 +107,124 @@ export function splitAudioWithFfmpeg(inputBuffer: Buffer, inputExt: string, work
   return segments;
 }
 
-async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<string> {
+async function transcribeWithHFModel(
+  audioBuffer: Buffer,
+  model: string,
+  language: string,
+  timeoutMs: number
+): Promise<string> {
   const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
   if (!HF_TOKEN) return '';
 
-  // V.42: Removed Groq entirely — user reported it's "فاشل" (failing).
-  // Now using HF whisper-large-v3 (HIGHEST QUALITY) as the PRIMARY transcriber.
-  // User explicitly said: "مش شرط عندي السرعه خالص اهم حاجة الجوده"
-  // (speed doesn't matter, quality is what matters)
-  //
-  // whisper-large-v3 is the most accurate Whisper model (better than turbo).
-  // It's free via HuggingFace Inference API.
-  const url = 'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3';
-  const response = await fetch(url, {
-    method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(180_000), // 3 min per segment — quality over speed
-  });
+  const base = 'https://router.huggingface.co/hf-inference/models';
+  const params = new URLSearchParams();
+  if (language) params.set('language', language);
+  const url = params.toString() ? `${base}/${model}?${params.toString()}` : `${base}/${model}`;
 
-  if (response.ok) {
+  console.error(`[Transcribe] Trying ${model} (timeout: ${timeoutMs / 1000}s)...`);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'audio/wav' };
+    if (HF_TOKEN) headers['Authorization'] = `Bearer ${HF_TOKEN}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers,
+      body: new Uint8Array(audioBuffer),
+    });
+
+    console.error(`[Transcribe] ${model} response: status=${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      console.error(`[Transcribe] ${model} error ${response.status}: ${errorText.slice(0, 300)}`);
+
+      // Cold start — wait and retry
+      if (response.status === 503 && (errorText.includes('loading') || errorText.includes('currently loading'))) {
+        console.error(`[Transcribe] ${model} loading, waiting 30s...`);
+        await new Promise(r => setTimeout(r, 30_000));
+
+        const retry = await fetch(url, {
+          method: 'POST',
+          signal: controller.signal,
+          headers,
+          body: new Uint8Array(audioBuffer),
+        });
+
+        if (retry.ok) {
+          const data = await retry.json();
+          console.error(`[Transcribe] ${model} success after retry: "${(data.text || '').slice(0, 80)}"`);
+          return data.text || '';
+        }
+
+        // Try ONE more time
+        if (retry.status === 503) {
+          console.error(`[Transcribe] ${model} still loading, waiting 30s more...`);
+          await new Promise(r => setTimeout(r, 30_000));
+          const retry2 = await fetch(url, {
+            method: 'POST',
+            signal: controller.signal,
+            headers,
+            body: new Uint8Array(audioBuffer),
+          });
+          if (retry2.ok) {
+            const data2 = await retry2.json();
+            return data2.text || '';
+          }
+        }
+      }
+      return '';
+    }
+
     const data = await response.json();
-    return data.text || '';
+    const text = data.text || '';
+    console.error(`[Transcribe] ${model} success: "${text.slice(0, 80)}"`);
+    return text;
+  } catch (err) {
+    console.error(`[Transcribe] ${model} exception:`, err instanceof Error ? err.message : String(err));
+    return '';
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  // 503 = model loading — retry after 20s
-  if (response.status === 503) {
-    console.error('[HF] Model loading, waiting 20s...');
-    await new Promise(r => setTimeout(r, 20_000));
-    const retry = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(180_000) });
-    if (retry.ok) { const data = await retry.json(); return data.text || ''; }
-  }
-
-  const errText = await response.text().catch(() => '');
-  console.error(`[HF] ${response.status}: ${errText.slice(0, 200)}`);
-  return '';
 }
 
-async function transcribeSegment(audioBuffer: Buffer, language: string, _useHF?: boolean, _onRetryWait?: (msg: string) => void): Promise<{ text: string; provider: 'groq' | 'hf' }> {
-  // V.42: Groq removed — HF Whisper is now the only transcriber.
-  // The _useHF and _onRetryWait params are kept for backward compatibility
-  // but no longer affect behavior (HF is always used).
-  console.error('[Transcribe] Using HF Whisper large-v3 (highest quality)');
-  const text = await transcribeWithHF(audioBuffer, language);
+async function transcribeSegment(
+  audioBuffer: Buffer,
+  language: string,
+  _useHF?: boolean,
+  _onRetryWait?: (msg: string) => void
+): Promise<{ text: string; provider: 'groq' | 'hf' }> {
+  // V.43: ONLY use HF Whisper models — no Groq, no ZAI.
+  // User explicitly requested:
+  //   1. distil-whisper/distil-large-v3 (fast)
+  //   2. openai/whisper-large-v3 (highest quality)
+  //
+  // For recordings, quality matters most:
+  //   "في تحليل الريكوردات مش شرط عندي السرعه خالص اهم حاجة الجوده"
+  // So we try distil first (fast), then fall back to large-v3 (best quality).
+
+  // ── MODEL 1: distil-whisper/distil-large-v3 (fast) ──
+  let text = await transcribeWithHFModel(
+    audioBuffer,
+    'distil-whisper/distil-large-v3',
+    language,
+    90_000 // 90s
+  );
+  if (text && text.trim()) {
+    return { text, provider: 'hf' };
+  }
+
+  // ── MODEL 2: openai/whisper-large-v3 (highest quality) ──
+  text = await transcribeWithHFModel(
+    audioBuffer,
+    'openai/whisper-large-v3',
+    language,
+    180_000 // 3 min — quality over speed
+  );
   return { text, provider: 'hf' };
 }
 
