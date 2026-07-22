@@ -44,7 +44,8 @@ async function transcribeWithHF(
 
   try {
     const headers: Record<string, string> = {};
-    const hfToken = process.env.HUGGINGFACE_API_TOKEN || '';
+    // V.42: Read HF token from multiple env vars (HF Space uses different names)
+    const hfToken = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
     if (hfToken) {
       headers['Authorization'] = `Bearer ${hfToken}`;
     }
