@@ -337,51 +337,59 @@ async function routeSummarize(
   language: 'ar' | 'en',
   onProgress?: ProgressCallback,
 ): Promise<string> {
-  const depth = intent.depth || 'medium';
-  onProgress?.('processing', 25, 'جاري تلخيص الملفات...', `العمق: ${depth}`);
+  const depth = intent.depth || 'detailed'; // V.52: default to detailed for deep analysis
+  onProgress?.('processing', 25, language === 'ar' ? '🧠 جاري التحليل العميق للمحتوى...' : 'Deep analysis...', `depth: ${depth}`);
 
   const result = await summarizeFiles(files, depth, language);
 
+  // V.52: Rich markdown output that reflects the AI's deep thinking
   let markdown = language === 'en'
-    ? `## Lecture Summaries\n\n`
-    : `## ملخص المحاضرات\n\n`;
+    ? `# 📚 Deep Analysis Report\n\n`
+    : `# 📚 تقرير التحليل العميق\n\n`;
 
-  // Per-file sections
+  // Per-file sections — structured as a full analysis
   for (const fileSummary of result.perFile) {
-    markdown += `### ${fileSummary.fileName}\n\n`;
+    markdown += language === 'en'
+      ? `## 📄 ${fileSummary.fileName}\n\n`
+      : `## 📄 ${fileSummary.fileName}\n\n`;
+
+    markdown += language === 'en'
+      ? `### 📝 Analysis\n\n`
+      : `### 📝 التحليل\n\n`;
     markdown += `${fileSummary.summary}\n\n`;
 
     if (fileSummary.keyPoints.length > 0) {
       markdown += language === 'en'
-        ? `**Key Points:**\n`
-        : `**النقاط الرئيسية:**\n`;
-      for (const point of fileSummary.keyPoints) {
-        markdown += `- ${point}\n`;
+        ? `### 🔑 Key Insights\n\n`
+        : `### 🔑 النقاط الجوهرية\n\n`;
+      for (let i = 0; i < fileSummary.keyPoints.length; i++) {
+        markdown += `**${i + 1}.** ${fileSummary.keyPoints[i]}\n\n`;
       }
-      markdown += '\n';
     }
+
+    markdown += `---\n\n`;
   }
 
-  // Cross-file summary
+  // Cross-file summary — the big picture
   if (result.crossSummary) {
     markdown += language === 'en'
-      ? `### Cross-File Summary\n\n`
-      : `### ملخص شامل\n\n`;
+      ? `## 🎯 Big Picture\n\n`
+      : `## 🎯 الصورة الكاملة\n\n`;
     markdown += `${result.crossSummary}\n\n`;
   }
 
-  // Common themes
+  // Common themes — connections between concepts
   if (result.commonThemes.length > 0) {
     markdown += language === 'en'
-      ? `### Common Themes\n\n`
-      : `### المواضيع المشتركة\n\n`;
+      ? `## 🔗 Connecting Themes\n\n`
+      : `## 🔗 المواضيع المترابطة\n\n`;
     for (const theme of result.commonThemes) {
       markdown += `- ${theme}\n`;
     }
     markdown += '\n';
   }
 
-  onProgress?.('processing', 60, 'تم تلخيص الملفات', `${result.perFile.length} ملفات`);
+  onProgress?.('processing', 60, language === 'ar' ? '✅ تم التحليل العميق' : 'Deep analysis complete', `${result.perFile.length} files`);
   return markdown;
 }
 
