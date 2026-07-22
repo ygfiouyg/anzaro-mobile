@@ -10,7 +10,9 @@
 import { getHFHeaders, HF_API_BASE } from './huggingface';
 import { getZAIClient } from './chat-utils';
 
-const ASR_TIMEOUT_MS = 30_000;
+// V.42: Increased from 30s to 120s — whisper-large-v3 has cold start
+// that can take 60-90s on first call. User wants quality over speed.
+const ASR_TIMEOUT_MS = 120_000;
 
 export type ASRProvider = 'hf-distil-whisper' | 'hf-whisper' | 'zai';
 
@@ -65,10 +67,10 @@ async function transcribeWithHF(
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
 
-      // Cold start — wait and retry
+      // Cold start — wait and retry (V.42: increased wait from 20s to 30s)
       if (response.status === 503 && (errorText.includes('loading') || errorText.includes('currently loading'))) {
-        console.log(`[HF-ASR] Model ${model} loading, waiting 20s...`);
-        await new Promise(resolve => setTimeout(resolve, 20_000));
+        console.log(`[HF-ASR] Model ${model} loading, waiting 30s for cold start...`);
+        await new Promise(resolve => setTimeout(resolve, 30_000));
 
         const retryResponse = await fetch(fullUrl, {
           method: 'POST',
@@ -79,6 +81,24 @@ async function transcribeWithHF(
 
         if (!retryResponse.ok) {
           const retryError = await retryResponse.text().catch(() => '');
+          // V.42: Try ONE more time if still loading
+          if (retryResponse.status === 503) {
+            console.log(`[HF-ASR] Still loading, waiting 30s more...`);
+            await new Promise(resolve => setTimeout(resolve, 30_000));
+            const retry2 = await fetch(fullUrl, {
+              method: 'POST',
+              signal: controller.signal,
+              headers,
+              body: new Uint8Array(buffer),
+            });
+            if (retry2.ok) {
+              const result2 = await retry2.json();
+              console.log(`[HF-ASR] Success after 2nd retry: "${(result2.text || '').slice(0, 50)}"`);
+              return result2.text || '';
+            }
+            const err2 = await retry2.text().catch(() => '');
+            throw new Error(`HF ASR error after 2 retries ${retry2.status}: ${err2.slice(0, 200)}`);
+          }
           throw new Error(`HF ASR error after retry ${retryResponse.status}: ${retryError.slice(0, 200)}`);
         }
 
