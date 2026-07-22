@@ -1334,10 +1334,10 @@ export function ChatInput() {
                 e.stopPropagation();
                 stopStreaming();
               }}
-              className="flex-shrink-0 p-2 rounded-lg transition-all duration-200 min-h-[40px] min-w-[40px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-lg animate-pulse"
+              className="flex-shrink-0 p-2 rounded-lg transition-all duration-200 min-h-[40px] min-w-[40px] flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white shadow-lg animate-pulse z-50"
               aria-label="إيقاف الرد"
               title="إيقاف الرد"
-              style={{ zIndex: 50 }}
+              
             >
               <X className="size-5" />
             </button>
