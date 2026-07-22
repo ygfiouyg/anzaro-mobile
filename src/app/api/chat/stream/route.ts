@@ -402,7 +402,7 @@ export async function POST(request: NextRequest) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: intent.query || message, source: intent.source }),
-          signal: AbortSignal.timeout(15_000),
+          // V.49: timeout removed
         });
 
         if (mediaResponse.ok) {
@@ -1505,14 +1505,14 @@ export async function POST(request: NextRequest) {
                       prompt: imagePrompt,
                       size: '1024x1024',
                     }),
-                    signal: AbortSignal.timeout(60_000),
+                    // V.49: timeout removed
                   });
                   if (imgRes.ok) {
                     const imgData = await imgRes.json();
                     const imageUrl = imgData?.data?.[0]?.url || imgData?.data?.[0]?.b64_json || '';
                     // If response is a URL, download and convert to base64 data URL
                     if (imageUrl && imageUrl.startsWith('http')) {
-                      const imgFetch = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+                      const imgFetch = await fetch(imageUrl, { // V.49: timeout removed });
                       const buf = Buffer.from(await imgFetch.arrayBuffer());
                       const mime = imgFetch.headers.get('content-type') || 'image/png';
                       const base64 = `data:${mime};base64,${buf.toString('base64')}`;
@@ -1593,7 +1593,7 @@ export async function POST(request: NextRequest) {
               }
 
               // ── 1) BigModel CogVideoX-Flash (FREE — async with polling) ──
-              // Submit task → poll /async-result/{task_id} until SUCCESS or timeout (2 min)
+              // Submit task → poll /async-result/{task_id} until SUCCESS or no timeout (V.49)
               try {
                 const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
                 const ZAI_BASE = 'https://open.bigmodel.cn/api/paas/v4';
@@ -1612,7 +1612,7 @@ export async function POST(request: NextRequest) {
                       duration: 5,
                       quality: 'speed',
                     }),
-                    signal: AbortSignal.timeout(30_000),
+                    // V.49: timeout removed
                   });
 
                   if (submitRes.ok) {
@@ -1629,7 +1629,7 @@ export async function POST(request: NextRequest) {
                         try {
                           const pollRes = await fetch(`${ZAI_BASE}/async-result/${taskId}`, {
                             headers: { 'Authorization': `Bearer ${ZAI_API_KEY}` },
-                            signal: AbortSignal.timeout(15_000),
+                            // V.49: timeout removed
                           });
                           if (pollRes.ok) {
                             const pollData = await pollRes.json();
@@ -2119,22 +2119,10 @@ ${JSON.stringify(_toolData)}
                   }
                 })();
 
-                // Race: if no content within 3s, abort Cerebras and fall back
-                const cerebrasTimeout = setTimeout(() => {
-                  if (!cerebrasGotContent && !cerebrasStreamDone) {
-                    cerebrasAbortController.abort();
-                    cerebrasResolve('timeout');
-                  }
-                }, 3_000);
-
+                // V.49: Cerebras timeout removed — let it run until it produces content or fails
                 const raceResult = await cerebrasFirstToken;
-                clearTimeout(cerebrasTimeout);
 
-                if (raceResult === 'timeout' && !cerebrasGotContent) {
-                  console.warn('[Chat] Cerebras first-token timeout (3s) — falling back to configured provider');
-                  // Wait a brief moment for the abort to propagate, then continue
-                  await new Promise((r) => setTimeout(r, 100));
-                } else if (cerebrasGotContent) {
+                if (raceResult === 'done' && cerebrasGotContent) {
                   // Cerebras actually produced content — wait for the full stream to complete
                   console.log(`[Chat] Cerebras succeeded (${accumulatedContent.length} chars), waiting for full stream...`);
                   // The stream is still running in the background — wait for it to finish
@@ -2260,7 +2248,7 @@ ${JSON.stringify(_toolData)}
                         prompt: textContent,
                       },
                     }),
-                    signal: AbortSignal.timeout(30_000),
+                    // V.49: timeout removed
                   });
                   
                   if (visionResponse.ok) {
@@ -2287,7 +2275,7 @@ ${JSON.stringify(_toolData)}
                         ]},
                       ],
                     }),
-                    signal: AbortSignal.timeout(30_000),
+                    // V.49: timeout removed
                   });
                   
                   if (pollResponse.ok) {
@@ -3472,7 +3460,7 @@ ${toolData}${extraStr}
                       stream: true,
                       temperature: 0.7,
                     }),
-                    signal: AbortSignal.timeout(120_000),
+                    // V.49: timeout removed
                   });
 
                   if (!response.ok) {
@@ -3814,7 +3802,8 @@ ${toolData}${extraStr}
                   // 45-second timeout for quiz generation (increased from 30s for larger content)
                   const quizResult = await Promise.race([
                     quizGenPromise,
-                    new Promise<null>((resolve) => setTimeout(() => {
+                    new Promise<null>((resolve) => ,// V.49: Cerebras timeout removed
+          // setTimeout(() => {
                       console.warn('[Chat] Quiz gen timed out after 45s');
                       resolve(null);
                     }, 45_000)),

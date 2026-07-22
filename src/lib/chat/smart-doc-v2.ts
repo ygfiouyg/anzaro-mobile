@@ -167,18 +167,10 @@ async function callLLMWithTimeout(
   timeoutMs: number = 60_000,
   model: string = 'glm-4-flash',
 ): Promise<string> {
+  // V.49: Timeout removed — user explicitly requested removing ALL timeouts
   try {
-    const result = await Promise.race([
-      callLLMStreamed(systemPrompt, userMessage, model),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-
-    if (result !== null) {
-      return result;
-    }
-
-    console.warn(`[SmartDocV2] LLM call timed out after ${timeoutMs}ms`);
-    return '';
+    const result = await callLLMStreamed(systemPrompt, userMessage, model);
+    return result;
   } catch (error) {
     console.error('[SmartDocV2] LLM call error:', error instanceof Error ? error.message : String(error));
     return '';
