@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken, getUserFromToken } from '@/lib/auth';
 import { traceAPI, traceError } from '@/lib/trace-logger';
-import { GROQ_API_KEY } from '@/lib/groq';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
 import { transcribeAudio as hfTranscribe } from '@/lib/hf-asr.service';
 
@@ -21,15 +20,20 @@ async function getZAIClient() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// DeltaAI ASR — Groq Whisper PRIMARY, ZAI SDK fallback
+// Anzaro ASR — HF Whisper PRIMARY (high quality), ZAI SDK fallback
 // ═══════════════════════════════════════════════════════════════════════
-// Groq Whisper large-v3 is ~200ms on LPU — FASTEST ASR available
-// ZAI SDK is the reliable fallback (~2s)
+// V.42: Removed Groq entirely — user reported it's "فاشل" (failing).
+// Now uses:
+//   1. HuggingFace whisper-large-v3 (HIGHEST QUALITY, free) — PRIMARY
+//   2. ZAI SDK ASR (fallback)
+//
+// User explicitly said: "مش شرط عندي السرعه خالص اهم حاجة الجوده"
+// (speed doesn't matter, quality is what matters)
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function POST(request: NextRequest) {
   try {
-    // ── Rate limiting + Auth: ASR allows guests but with lower rate limits ──
+    // ── Rate limiting + Auth ──
     const authHeader = request.headers.get('authorization');
     const token = extractBearerToken(authHeader);
     let userId: string | undefined;
@@ -56,45 +60,10 @@ export async function POST(request: NextRequest) {
 
     traceAPI(`ASR: تحويل صوت إلى نص (${language})`);
 
-    // ── PRIMARY: Groq Whisper (fastest, ~200ms on LPU) ──────────────
-    try {
-      const groqFormData = new FormData();
-      groqFormData.append('file', audioFile, audioFile.name || 'audio.webm');
-      groqFormData.append('model', 'whisper-large-v3');
-      groqFormData.append('language', language);
-      groqFormData.append('response_format', 'json');
-
-      const groqResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-        },
-        body: groqFormData,
-        signal: AbortSignal.timeout(60_000), // V.39: increased from 5s to 60s — 5s was too short for normal speech
-      });
-
-      if (groqResponse.ok) {
-        const groqResult = await groqResponse.json();
-        const groqText = groqResult.text?.trim();
-        if (groqText) {
-          traceAPI(`ASR: Groq Whisper نجح (${groqText.length} حرف)`);
-          return NextResponse.json({
-            text: groqText,
-            language,
-            provider: 'groq',
-          });
-        }
-      }
-      const errBody = await groqResponse.text().catch(() => '');
-      console.warn(`[ASR] Groq Whisper failed (${groqResponse.status}): ${errBody.slice(0, 200)}`);
-    } catch (groqErr) {
-      console.warn('[ASR] Groq Whisper error, falling back to HF:', groqErr instanceof Error ? groqErr.message : String(groqErr));
-    }
-
-    // ── FALLBACK 1: HuggingFace Whisper (high quality, free) ────────
-    // V.41: Added HF Whisper as first fallback — uses whisper-large-v3
-    // (most accurate) and distil-whisper (fast). This gives better quality
-    // than ZAI SDK ASR.
+    // ── PRIMARY: HuggingFace Whisper large-v3 (HIGHEST QUALITY) ──────
+    // V.42: Groq removed — user reported quality issues.
+    // HF whisper-large-v3 is the most accurate Whisper model available.
+    // It's free via HuggingFace Inference API.
     try {
       const arrayBuffer = await audioFile.arrayBuffer();
       const hfResult = await hfTranscribe({
@@ -114,12 +83,11 @@ export async function POST(request: NextRequest) {
       console.warn('[ASR] HF Whisper failed, trying ZAI:', hfErr instanceof Error ? hfErr.message : String(hfErr));
     }
 
-    // ── FALLBACK 2: ZAI SDK ASR (~2s) ───────────────────────────────
+    // ── FALLBACK: ZAI SDK ASR ────────────────────────────────────────
     const zaiArrayBuffer = await audioFile.arrayBuffer();
     const buffer = Buffer.from(zaiArrayBuffer);
     const base64Audio = buffer.toString('base64');
 
-    // Determine MIME type
     const mimeType = audioFile.type || 'audio/wav';
     const dataUrl = `data:${mimeType};base64,${base64Audio}`;
 
@@ -131,13 +99,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call ASR API
     const result = await zai.audio.asr.create({
       file: dataUrl,
       language,
     });
 
-    // Extract transcription text from the result
     let text = '';
     if (typeof result === 'string') {
       text = result;
@@ -157,7 +123,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[ASR] Error:', error);
     traceError(`ASR خطأ: ${error instanceof Error ? error.message : 'خطأ غير معروف'}`);
-    // Reset client on error
     zaiClient = null;
     return NextResponse.json(
       { error: 'فشل في تحويل الصوت إلى نص' },

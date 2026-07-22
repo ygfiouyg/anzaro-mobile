@@ -107,77 +107,20 @@ export function splitAudioWithFfmpeg(inputBuffer: Buffer, inputExt: string, work
   return segments;
 }
 
-async function transcribeWithGroq(audioBuffer: Buffer, language: string, prompt?: string, onRetryWait?: (msg: string) => void): Promise<{ text: string; rateLimited: boolean }> {
-  const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-  if (!GROQ_API_KEY) return { text: '', rateLimited: false };
-
-  // V.36c: Reverted to V.35's simple Egyptian prompt.
-  // The V.36 long/technical-terms prompt leaked into the transcript output
-  // (Whisper included prompt text like "المحاضرة بالعامية المصرية" in the result).
-  // This simple prompt works well (produced 20,832 chars in V.35 test).
-  const egyptianPrompt = prompt || 'الصوت ده بالعامية المصرية. اكتب اللي بتسمعه زي ما بيتقال بالظبط، بالعامية المصرية، من غير ما تحوّله لفصحى. يعني اكتب "إزيك" مش "كيف حالك"، و"النهارده" مش "اليوم"، و"كده" مش "هكذا"، و"عشان" مش "لأن".';
-
-  async function attemptGroq(): Promise<{ text: string; rateLimited: boolean; status: number }> {
-    const formData = new FormData();
-    formData.append('file', new Blob([audioBuffer], { type: 'audio/wav' }), 'segment.wav');
-    formData.append('model', 'whisper-large-v3');
-    formData.append('language', language);
-    formData.append('response_format', 'json');
-    formData.append('temperature', '0.0');
-    formData.append('prompt', egyptianPrompt);
-
-    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST', headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: formData, signal: AbortSignal.timeout(120_000),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return { text: data.text || '', rateLimited: false, status: 200 };
-    }
-
-    const errText = await response.text().catch(() => '');
-    console.error(`[Groq] ${response.status}: ${errText.slice(0, 200)}`);
-    if (response.status === 429) return { text: '', rateLimited: true, status: 429 };
-    return { text: '', rateLimited: false, status: response.status };
-  }
-
-  // First attempt
-  const result1 = await attemptGroq();
-  if (result1.text) return { text: result1.text, rateLimited: false };
-
-  // If rate-limited (429), wait 30s and retry ONCE.
-  // Send heartbeat during the wait so the SSE proxy doesn't kill the connection.
-  if (result1.rateLimited) {
-    onRetryWait?.('[Groq] Rate limited (429). Waiting 30s and retrying...');
-    console.error('[Groq] Rate limited (429). Waiting 30s and retrying...');
-    // Send heartbeats every 5s during the 30s wait to keep SSE alive
-    for (let w = 0; w < 6; w++) {
-      await new Promise(r => setTimeout(r, 5_000));
-      onRetryWait?.(`[Groq] Retry in ${30 - (w + 1) * 5}s...`);
-    }
-    const result2 = await attemptGroq();
-    if (result2.text) return { text: result2.text, rateLimited: false };
-    if (result2.rateLimited) {
-      console.error('[Groq] Still rate limited after 30s wait. Falling back to HF.');
-    }
-    return { text: result2.text, rateLimited: result2.rateLimited };
-  }
-
-  return { text: '', rateLimited: false };
-}
-
 async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<string> {
   const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
   if (!HF_TOKEN) return '';
 
-  // V.35: Use whisper-large-v3-turbo (faster) as primary, but we can't pass a
-  // prompt via the HF Inference API. The model will still tend to normalize
-  // Egyptian to MSA, but it's our fallback when Groq is rate-limited.
-  // TODO: If we need better Egyptian dialect support, use the OpenAI Whisper
-  // API directly (supports prompt) or fine-tune a model on Egyptian Arabic.
-  const url = 'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo';
+  // V.42: Removed Groq entirely — user reported it's "فاشل" (failing).
+  // Now using HF whisper-large-v3 (HIGHEST QUALITY) as the PRIMARY transcriber.
+  // User explicitly said: "مش شرط عندي السرعه خالص اهم حاجة الجوده"
+  // (speed doesn't matter, quality is what matters)
+  //
+  // whisper-large-v3 is the most accurate Whisper model (better than turbo).
+  // It's free via HuggingFace Inference API.
+  const url = 'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3';
   const response = await fetch(url, {
-    method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(120_000),
+    method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(180_000), // 3 min per segment — quality over speed
   });
 
   if (response.ok) {
@@ -189,7 +132,7 @@ async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<
   if (response.status === 503) {
     console.error('[HF] Model loading, waiting 20s...');
     await new Promise(r => setTimeout(r, 20_000));
-    const retry = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(120_000) });
+    const retry = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'audio/wav' }, body: audioBuffer, signal: AbortSignal.timeout(180_000) });
     if (retry.ok) { const data = await retry.json(); return data.text || ''; }
   }
 
@@ -198,23 +141,13 @@ async function transcribeWithHF(audioBuffer: Buffer, language: string): Promise<
   return '';
 }
 
-async function transcribeSegment(audioBuffer: Buffer, language: string, useHF: boolean, onRetryWait?: (msg: string) => void): Promise<{ text: string; provider: 'groq' | 'hf' }> {
-  if (useHF) {
-    console.error('[Transcribe] Using HF (Groq was rate limited)');
-    return { text: await transcribeWithHF(audioBuffer, language), provider: 'hf' };
-  }
-
-  console.error('[Transcribe] Trying Groq...');
-  const groqResult = await transcribeWithGroq(audioBuffer, language, undefined, onRetryWait);
-  if (groqResult.text) return { text: groqResult.text, provider: 'groq' };
-
-  if (groqResult.rateLimited) {
-    console.error('[Transcribe] Groq 429 after retry — falling back to HF...');
-    return { text: await transcribeWithHF(audioBuffer, language), provider: 'hf' };
-  }
-
-  console.error('[Transcribe] Groq failed, trying HF...');
-  return { text: await transcribeWithHF(audioBuffer, language), provider: 'hf' };
+async function transcribeSegment(audioBuffer: Buffer, language: string, _useHF?: boolean, _onRetryWait?: (msg: string) => void): Promise<{ text: string; provider: 'groq' | 'hf' }> {
+  // V.42: Groq removed — HF Whisper is now the only transcriber.
+  // The _useHF and _onRetryWait params are kept for backward compatibility
+  // but no longer affect behavior (HF is always used).
+  console.error('[Transcribe] Using HF Whisper large-v3 (highest quality)');
+  const text = await transcribeWithHF(audioBuffer, language);
+  return { text, provider: 'hf' };
 }
 
 /**
