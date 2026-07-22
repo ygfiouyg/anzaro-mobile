@@ -2,16 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken, getUserFromToken } from '@/lib/auth';
 import { traceAPI, traceError } from '@/lib/trace-logger';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
-import { getZAIClient } from '@/lib/chat-utils';
+import { transcribeWithGemini, isGeminiASRAvailable } from '@/lib/gemini-asr';
 
 // ═══════════════════════════════════════════════════════════════════════
-// Anzaro ASR — HF Whisper ONLY (distil-whisper + whisper-large-v3)
+// Anzaro ASR — Gemini PRIMARY, HF Whisper fallback
 // ═══════════════════════════════════════════════════════════════════════
-// V.43: User explicitly requested ONLY these two models:
-//   1. distil-whisper/distil-large-v3 (fast)
-//   2. openai/whisper-large-v3 (highest quality)
+// V.45: User requested NO ZAI (Chinese company, bad Arabic quality).
+// Now uses:
+//   1. Google Gemini (PRIMARY — great Arabic dialect support, uses GOOGLE_AI_KEY)
+//   2. distil-whisper/distil-large-v3 (fallback — HF credits depleted)
+//   3. openai/whisper-large-v3 (fallback — HF credits depleted)
 //
-// No Groq. No ZAI SDK. No other providers. Period.
+// No Groq. No ZAI SDK. Period.
 // ═══════════════════════════════════════════════════════════════════════
 
 const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_API_TOKEN || process.env.HF_TOKEN || '';
@@ -130,17 +132,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ملف الصوت مطلوب' }, { status: 400 });
     }
 
-    if (!HF_TOKEN) {
-      return NextResponse.json(
-        { error: 'HuggingFace token not configured' },
-        { status: 503 }
-      );
-    }
-
     traceAPI(`ASR: تحويل صوت إلى نص (${language})`);
 
     const arrayBuffer = await audioFile.arrayBuffer();
     const audioBuffer = Buffer.from(arrayBuffer);
+
+    // ── PRIMARY: Google Gemini (best Arabic dialect support) ──
+    // V.45: User explicitly requested NO ZAI — Gemini is the best free option
+    if (isGeminiASRAvailable()) {
+      try {
+        const text = await transcribeWithGemini(audioBuffer, language);
+        if (text && text.trim()) {
+          traceAPI(`ASR: Gemini نجح (${text.length} حرف)`);
+          return NextResponse.json({
+            text: text.trim(),
+            language,
+            provider: 'gemini',
+          });
+        }
+      } catch (geminiErr) {
+        console.warn('[ASR] Gemini failed:', geminiErr instanceof Error ? geminiErr.message : String(geminiErr));
+      }
+    }
+
+    // ── FALLBACK 1: distil-whisper/distil-large-v3 ──
+    if (!HF_TOKEN) {
+      return NextResponse.json(
+        { error: 'خدمة التعرف على الصوت غير متاحة — GOOGLE_AI_KEY و HF_TOKEN غير مكونين' },
+        { status: 503 }
+      );
+    }
 
     // ── MODEL 1: distil-whisper/distil-large-v3 (fast) ──
     try {
@@ -180,38 +201,6 @@ export async function POST(request: NextRequest) {
       }
     } catch (err) {
       console.warn('[ASR] whisper-large-v3 failed:', err instanceof Error ? err.message : String(err));
-    }
-
-    // ── LAST RESORT: ZAI SDK (only if HF credits are depleted) ──
-    // V.43b: HF Inference credits depleted (402 error). ZAI SDK is the
-    // only free option remaining. User requested ONLY distil-whisper +
-    // whisper-large-v3, but those require paid HF credits now.
-    // ZAI SDK uses ZAI_API_KEY (ZhipuAI/GLM) — free, decent quality.
-    console.log('[ASR] HF models failed, trying ZAI SDK as last resort...');
-    try {
-      const zai = await getZAIClient();
-      console.log('[ASR] ZAI client ready (via our wrapper), transcribing...');
-      const zaiArrayBuffer = await audioFile.arrayBuffer();
-      const buffer = Buffer.from(zaiArrayBuffer);
-      const base64Audio = buffer.toString('base64');
-      const mimeType = audioFile.type || 'audio/wav';
-      const dataUrl = `data:${mimeType};base64,${base64Audio}`;
-
-      const result = await zai.audio.asr.create({ file: dataUrl, language });
-      console.log('[ASR] ZAI SDK response:', typeof result, JSON.stringify(result).slice(0, 200));
-      let text = '';
-      if (typeof result === 'string') text = result;
-      else if (result?.text) text = result.text;
-      else if (result?.data?.text) text = result.data.text;
-      else if (Array.isArray(result)) text = result.map((item: any) => item.text || '').join(' ');
-
-      if (text && text.trim()) {
-        traceAPI(`ASR: ZAI SDK نجح (${text.length} حرف)`);
-        return NextResponse.json({ text: text.trim(), language, provider: 'zai' });
-      }
-      console.warn('[ASR] ZAI SDK returned empty text');
-    } catch (zaiErr) {
-      console.warn('[ASR] ZAI SDK failed:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
     }
 
     // All providers failed
