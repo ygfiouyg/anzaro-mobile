@@ -3486,3 +3486,55 @@ Task: Google OAuth + Guest login + Drive user account + Gemini ASR + Omni PDF
 - ⏳ Omni PDF: محتاج اختبار بعد الـ rebuild
 
 *Last updated: 2025-01-30 (Round 46) · V.45-V.46 batch fixes*
+
+---
+Task ID: v46-ai-operations-ui-intent
+Agent: main (Z.ai Code)
+Task: استبدال 3 نقاط بحالة AI + استبدال regex بـ AI intent detection
+
+### V.46: Rich AI Status Indicator (replaces 3-dots)
+المستخدم طلب: "اربطلي العمليات اللي AI بينفذها بالفرونت مكان ال3 نقاط"
+
+**التغييرات:**
+1. MessageBubble.tsx — استبدلت الـ 3-dots بـ:
+   - Smart Doc Progress card (أخضر) مع progress bar + نسبة مئوية
+   - Backend Status indicator (أزرق) مع ping animation + phase label
+   - File Generation status (أصفر) مع spinner
+   - بيكتب "🤔 بيفكّر..." لما مفيش status متاح
+
+2. chat-store.ts — smartDocProgress events بتحديث الـ backendStatus:
+   - "جاري توليد المحتوى بالذكاء الاصطناعي..."
+   - "جاري صياغة المحتوى الأكاديمي..."
+   - "جاري تحليل التصميم واختيار الألوان..."
+   - "جاري إنشاء ملف PDF..."
+   - "☁️ جاري الرفع على Google Drive..."
+
+### V.46b: AI-Based Intent Detection (replaces regex)
+المستخدم طلب: "مش حابب regex دا وعاوز كسف النيه وان الذكاء الاصطناعي يفهم المطلوب"
+
+**التغييرات:**
+1. دالة جديدة: classifyDocIntentWithAI() في doc-intent-classifier.ts
+   - بتستخدم ZAI (GLM-4-Flash) لتصنيف نية المستخدم
+   - بتصنف: summarize, compile, extract-topic, outline, compare, flashcards, quiz, smart-doc, chat-only
+   - بتشتغل لما regex يرجع null AND فيه مرفقات أو طلب ملف
+
+2. Chat stream route:
+   - الأول regex (سريع)
+   - لو null → AI classification (LLM يفهم النية)
+   - الـ AI بيفهم: "اجمعلي اهم النقاط اللي في ال pdf" = summarize
+
+### كل الإصلاحات من V.39 لـ V.46:
+✅ V.39: زرار المايك + زرار إيقاف + شيل timeout + debounce localStorage
+✅ V.40: استرجاع models.ts (تراجع)
+✅ V.41: HF Whisper ASR fallback
+✅ V.42: شيل Groq + ZAI من ASR
+✅ V.43: بس distil-whisper + whisper-large-v3
+✅ V.44: رفع PDF منفصل (إصلاح timeout)
+✅ V.45: Google OAuth + Guest login + Drive user account + Gemini ASR
+✅ V.46: Omni-Orchestrator لـ PDF + AI status indicator + AI intent detection
+
+### لسه محتاج من المستخدم:
+- Gemini API key صالح (GOOGLE_AI_KEY مش شغال مع Gemini API)
+- اختبار Google OAuth من الـ UI
+
+*Last updated: 2025-01-30 (Round 46) · V.46 AI operations + intent detection*
