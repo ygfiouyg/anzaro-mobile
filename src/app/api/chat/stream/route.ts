@@ -3799,15 +3799,8 @@ ${toolData}${extraStr}
               // ── Send quiz data if generated ──
               if (quizGenPromise) {
                 try {
-                  // 45-second timeout for quiz generation (increased from 30s for larger content)
-                  const quizResult = await Promise.race([
-                    quizGenPromise,
-                    new Promise<null>((resolve) => ,// V.49: Cerebras timeout removed
-          // setTimeout(() => {
-                      console.warn('[Chat] Quiz gen timed out after 45s');
-                      resolve(null);
-                    }, 45_000)),
-                  ]);
+                  // V.49: Timeout removed — let quiz gen run until it completes
+                  const quizResult = await quizGenPromise;
                   if (quizResult && !streamClosed) {
                     // Add source info for the frontend to display context-aware label
                     const quizDataWithSource = {
