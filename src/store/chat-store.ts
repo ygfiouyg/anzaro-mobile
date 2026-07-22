@@ -901,6 +901,21 @@ export const useChatStore = create<ChatState>()(
                     if (parsed.smartDocProgress) {
                       const { stage, progress, message, detail } = parsed.smartDocProgress;
                       get().setDocumentGenProgress({ stage, progress, detail: message || detail || '' });
+                      // V.46: Also update the message's backendStatus so it shows in the UI
+                      set((state) => ({
+                        conversations: state.conversations.map((conv) =>
+                          conv.id === conversationId
+                            ? {
+                                ...conv,
+                                messages: conv.messages.map((m) =>
+                                  m.id === assistantMessage.id
+                                    ? { ...m, backendStatus: message || detail || `جاري المعالجة... ${progress}%`, backendPhase: stage }
+                                    : m
+                                ),
+                              }
+                            : conv
+                        ),
+                      }));
                     }
                     if (parsed.smartDocResult) {
                       const result = parsed.smartDocResult;

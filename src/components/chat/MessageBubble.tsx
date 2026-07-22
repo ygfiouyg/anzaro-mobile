@@ -797,10 +797,49 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
               ) : null}
             </div>
           ) : message.content === '' && isStreaming ? (
-            <div className="streaming-dots py-1">
-              <span />
-              <span />
-              <span />
+            // V.46: Replace 3-dots with rich AI status indicator
+            // Shows backendStatus if available, otherwise shows "بيفكّر..."
+            // Also shows smartDocProgress if available
+            <div className="py-2 space-y-2">
+              {/* Smart Doc Progress */}
+              {typeof window !== 'undefined' && (window as any).__smartDocProgress && (
+                <div className="px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="size-3.5 text-emerald-600 dark:text-emerald-400 animate-spin" />
+                    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      {(window as any).__smartDocProgress.message || 'جاري المعالجة...'}
+                    </span>
+                    <span className="text-[10px] text-emerald-500 ml-auto">
+                      {(window as any).__smartDocProgress.progress || 0}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900 overflow-hidden">
+                    <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${(window as any).__smartDocProgress.progress || 0}%` }} />
+                  </div>
+                </div>
+              )}
+              {/* Backend status or thinking indicator */}
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
+                <span className="relative flex size-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                </span>
+                <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                  {(message as any).backendStatus || '🤔 بيفكّر...'}
+                </span>
+                {(message as any).backendPhase && (
+                  <span className="text-[9px] uppercase tracking-wider text-zinc-400 dark:text-zinc-600 ml-auto">
+                    {(message as any).backendPhase === 'thinking' ? 'تفكير' : (message as any).backendPhase === 'executing' ? 'تنفيذ' : 'كتابة'}
+                  </span>
+                )}
+              </div>
+              {/* File generation status */}
+              {message.fileGenStatus === 'generating' && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">
+                  <Loader2 className="size-3.5 text-amber-600 dark:text-amber-400 animate-spin" />
+                  <span className="text-xs font-medium text-amber-700 dark:text-amber-300">📄 جاري إنشاء ملف PDF...</span>
+                </div>
+              )}
             </div>
           ) : isStreaming ? (
             // V.20: During streaming, render as plain text (fast) — no markdown parsing.
