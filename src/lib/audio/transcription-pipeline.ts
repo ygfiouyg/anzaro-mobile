@@ -231,9 +231,11 @@ async function transcribeSegment(
 
   // ── LAST RESORT: ZAI SDK (only if HF credits are depleted) ──
   // V.43b: HF credits depleted (402). ZAI SDK is the only free option.
+  // V.43c: Use our getZAIClient wrapper (reads ZAI_API_KEY env var)
+  // instead of the official SDK's ZAI.create() (which needs .z-ai-config file).
   try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
+    const { getZAIClient } = await import('@/lib/chat-utils');
+    const zai = await getZAIClient();
     const base64Audio = audioBuffer.toString('base64');
     const dataUrl = `data:audio/wav;base64,${base64Audio}`;
     const result = await zai.audio.asr.create({ file: dataUrl, language });

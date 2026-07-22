@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken, getUserFromToken } from '@/lib/auth';
 import { traceAPI, traceError } from '@/lib/trace-logger';
 import { checkRateLimit, RATE_LIMIT_PRESETS } from '@/lib/rate-limit';
+import { getZAIClient } from '@/lib/chat-utils';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Anzaro ASR — HF Whisper ONLY (distil-whisper + whisper-large-v3)
@@ -188,10 +189,8 @@ export async function POST(request: NextRequest) {
     // ZAI SDK uses ZAI_API_KEY (ZhipuAI/GLM) — free, decent quality.
     console.log('[ASR] HF models failed, trying ZAI SDK as last resort...');
     try {
-      const ZAI = (await import('z-ai-web-dev-sdk')).default;
-      console.log('[ASR] ZAI SDK imported, creating client...');
-      const zai = await ZAI.create();
-      console.log('[ASR] ZAI client created, transcribing...');
+      const zai = await getZAIClient();
+      console.log('[ASR] ZAI client ready (via our wrapper), transcribing...');
       const zaiArrayBuffer = await audioFile.arrayBuffer();
       const buffer = Buffer.from(zaiArrayBuffer);
       const base64Audio = buffer.toString('base64');
