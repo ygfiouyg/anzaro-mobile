@@ -87,13 +87,13 @@ const INTENT_PATTERNS: IntentPattern[] = [
     patterns: [
       // Arabic: "لخصلي", "اعمل ملخص", "خليها مختصرة"
       /لخصلي?\s*/i,
-      /لخ[صض]\s+(ال)?محاضرات?\s*/i,
+      /لخ[صض]\s+(ال)?محاضر[هت]??\s*/i,
       /اعمل\s*(لي?\s*)?ملخص\s*/i,
       /اعمللي?\s*ملخص\s*/i,
       /اعملي\s*ملخص\s*/i,
       /خليه[ا]?م?\s*مختصر[ةه]?\s*/i,
       /اختصر(لي)?\s*/i,
-      /ملخص\s*(لل)?محاضرات?\s*/i,
+      /ملخص\s*(لل)?محاضر[هت]??\s*/i,
       /لخص\s*كلهم?\s*(في)?\s*/i,
       /لخصلي?\s*كلهم?\s*/i,
       /ملخص\s*(شامل|عام|موجز)/i,
@@ -124,10 +124,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
       // Arabic: "اعمل تجميعة", "اجمع كل", "حط كلهم مع بعض", "لمي كل"
       /اعمل\s*(لي?\s*)?تجميع[ةه]\s*/i,
       /تجميع[ةه]\s*(ل)?كل\s*/i,
-      /اجمع\s*(كل\s*)?(المحاضرات?|الملفات|المستندات|الملف)/i,
+      /اجمع\s*(كل\s*)?(المحاضر[هت]??|الملفات|المستندات|الملف)/i,
       /حط\s*(كلهم?|الكل)\s*مع\s*بعض\s*/i,
-      /لم[يى]?\s*كل\s*(المحاضرات?|الملفات)/i,
-      /جم[عى]?\s*(كل\s*)?(المحاضرات?|الملفات)\s*(في|فيه|حط)/i,
+      /لم[يى]?\s*كل\s*(المحاضر[هت]??|الملفات)/i,
+      /جم[عى]?\s*(كل\s*)?(المحاضر[هت]??|الملفات)\s*(في|فيه|حط)/i,
       /ضفهم?\s*(كلهم?|بعض)\s*(مع|في)\s*/i,
       /كلهم?\s*(في\s*)?ملف\s*(واحد)?/i,
       /حطهم?\s*كلهم?\s*في\s*/i,
@@ -137,12 +137,12 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /تجميع[ةه]?\s*بكل\s*(ال)?/i,  // "تجميعة بكل القوانين"
       /لم[يى]?\s*(ال)?(قوانين|أحكام|مواد)/i,
       /اجمع\s*(ال)?(دروس|ملازم|مقرر|منهج|كتاب)/i,
-      /تجميع[ةه]?\s*(لل)?(محاضرات|دروس|ملازم|مقرر|منهج)/i,
-      /لم[يى]?\s*(ال)?(محاضرات|دروس|ملازم)/i,
+      /تجميع[ةه]?\s*(لل)?(محاضر[هت]?|دروس|ملازم|مقرر|منهج)/i,
+      /لم[يى]?\s*(ال)?(محاضر[هت]?|دروس|ملازم)/i,
       // Law/legal specific
       /كل\s*القوانين/i,
       /القوانين\s*(كلها|جميعها|كاملة)/i,
-      // "تجميعة كل الكلام اللي في كل المحاضرات" type requests
+      // "تجميعة كل الكلام اللي في كل المحاضر[هت]?" type requests
       /تجميع[ةه]?\s*كل\s*(الكلام|المحتوى|الحاجات|المعلومات|اللي)/i,
       /كل\s*(الكلام|المحتوى|المعلومات)\s*(اللي|في)\s*(كل|جميع)/i,
       // English
@@ -169,11 +169,11 @@ const INTENT_PATTERNS: IntentPattern[] = [
       // Arabic: "اعمللي فهرس/خطة", "رتبلي", "اعمل هيكل"
       /اعمل\s*(لي?\s*)?(فهرس|خطة|خطة\s*دراسية|هيكل)\s*/i,
       /اعمللي?\s*(فهرس|خطة|هيكل)\s*/i,
-      /رتب(لي)?\s*(المحاضرات?|المحتوى|الملفات)?\s*/i,
-      /نظم(لي)?\s*(المحاضرات?|المحتوى|الملفات)?\s*/i,
+      /رتب(لي)?\s*(المحاضر[هت]??|المحتوى|الملفات)?\s*/i,
+      /نظم(لي)?\s*(المحاضر[هت]??|المحتوى|الملفات)?\s*/i,
       /رتبلي?\s*/i,
-      /هيكل(ة)?\s*(ل)?(لمحتوى|لمحاضرات)/i,
-      /فهرس\s*(ل)?(لمحاضرات|لمحتوى|للملفات)/i,
+      /هيكل(ة)?\s*(ل)?(لمحتوى|لمحاضر[هت]?)/i,
+      /فهرس\s*(ل)?(لمحاضر[هت]?|لمحتوى|للملفات)/i,
       /خطة\s*(ل)?(لمذاكرة|للدراسة|للمحتوى)/i,
       // English
       /create\s+(an?\s+)?outline\s*(for|of)?/i,
@@ -198,9 +198,9 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /اي[هة]?\s*الفرق\s*بين\s*/i,
       /اي[هة]?\s*الفروق\s*بين\s*/i,
       /شوف\s*الفرق\s*بين\s*/i,
-      /فرق\s*بين\s*(المحاضرتين|الملفين|المحاضرات)/i,
+      /فرق\s*بين\s*(المحاضرتين|الملفين|المحاضر[هت]?)/i,
       /اعمل\s*(لي?\s*)?مقارن[ةه]?\s*(بين)?\s*/i,
-      /قارن?\s*(المحاضرة|المحاضرات|الملفات|الملف)/i,
+      /قارن?\s*(المحاضرة|المحاضر[هت]?|الملفات|الملف)/i,
       // English
       /compare\s*(the\s+)?(lectures?|files?|documents?|notes?)?/i,
       /differences?\s*between\s*/i,
@@ -241,10 +241,14 @@ const INTENT_PATTERNS: IntentPattern[] = [
     weight: 4, // High weight — quiz is very specific (handled by quiz-service)
     patterns: [
       // Arabic — reuse patterns from quiz-intent.ts
+      // V.37: Made quiz patterns more specific — "امتحاني" alone was too broad
+      // and matched "النقاط اللي لازم تيجي ف الامتحان" (exam points, not a quiz request).
+      // Now requires an action verb before "امتحان" or "اسئلة".
       /اعمل[ي]?ل?[ي]?\s*(?:لي)?\s*(?:اسئل[هة]|كويز|اختبار)/i,
       /(?:حطلي|جبلي|هاتلي|عطيني|جهزلي|صنعلي|ولدلي|انشئلي)\s*(?:اسئل[هة]|كويز)/i,
       /اختبرن[يى]\s*/i,
-      /امتحاني?\s*/i,
+      /(?:اعمل|جهز|حط|جب|هات|عطيني)\s*(?:لي)?\s*امتحان/i,  // V.37: requires action verb
+      /امتحاني\s*(بس|بعد كده|دلوقتي)/i,  // V.37: "امتحاني بس" (quiz me now) — requires يا suffix
       /اسئل[هة]\s*(في|عن|من|على)/i,
       /أسئل[هة]\s*(في|عن|من|على)/i,
       // English
@@ -372,7 +376,7 @@ const TOPIC_PATTERNS_AR: Array<{ pattern: RegExp; groupIndex: number }> = [
   { pattern: /عن\s*(الـ)?(.+?)\s*(?:من|في|عند|بس|فقط|$)/i, groupIndex: 2 },
   // "في موضوع X" → topic = X
   { pattern: /في\s*موضوع\s*(الـ)?(.+?)(?:\s+من|\s+في|$)/i, groupIndex: 2 },
-  // "لخصلي المحاضرات عن X" → topic = X
+  // "لخصلي المحاضر[هت]? عن X" → topic = X
   { pattern: /(?:لخص|ملخص|اختصر).*?عن\s*(الـ)?(.+?)\s*(?:من|في|عند|$)/i, groupIndex: 2 },
   // "لخصلي جزء الغضارف" → topic = الغضارف (summarize + specific part)
   { pattern: /(?:لخص|ملخص|اختصر).*?جزء\s+(الـ)?(.+?)(?:\s+من|\s+في|\s+عند|$)/i, groupIndex: 2 },
@@ -473,7 +477,7 @@ const SCOPE_ALL_PATTERNS: RegExp[] = [
   /\bكلكم\b/i,
   /\bالكل\b/i,
   /\bكامل[ةه]?\b/i,
-  /\bالمحاضرات\b/i, // plural = all
+  /\bالمحاضر[هت]?\b/i, // plural = all
   /\bالملفات\b/i,
   // English
   /\ball\b/i,
@@ -600,20 +604,20 @@ const NEGATIVE_PATTERNS: RegExp[] = [
 // ─── Implicit File Generation Patterns ─────────────────────────────────────
 // These patterns detect when the user's request IMPLIES file generation,
 // even without explicit keywords like "ملف" or "pdf".
-// Examples: "لخص القوانين", "اجمع المحاضرات", "شامل للقوانين"
+// Examples: "لخص القوانين", "اجمع المحاضر[هت]?", "شامل للقوانين"
 // The system should auto-generate a file for these requests.
 
 const IMPLICIT_FILE_GEN_PATTERNS: RegExp[] = [
   // ── Summarize + implies structured output ──
-  /لخص(لي)?\s*(ال)?(قوانين|محاضرات|دروس|ملازم|مقرر|منهج|كتاب|مذكرة)/i,
-  /ملخص\s*(لل)?(قوانين|محاضرات|دروس|ملازم|مقرر|منهج|كتاب|مذكرة)/i,
-  /اعمل\s*(لي?\s*)?ملخص\s*(لل)?(قوانين|محاضرات|دروس|ملازم|مقرر|منهج)/i,
-  /اختصر(لي)?\s*(ال)?(قوانين|محاضرات|دروس|ملازم|مقرر|منهج)/i,
+  /لخص(لي)?\s*(ال)?(قوانين|محاضر[هت]?|دروس|ملازم|مقرر|منهج|كتاب|مذكرة)/i,
+  /ملخص\s*(لل)?(قوانين|محاضر[هت]?|دروس|ملازم|مقرر|منهج|كتاب|مذكرة)/i,
+  /اعمل\s*(لي?\s*)?ملخص\s*(لل)?(قوانين|محاضر[هت]?|دروس|ملازم|مقرر|منهج)/i,
+  /اختصر(لي)?\s*(ال)?(قوانين|محاضر[هت]?|دروس|ملازم|مقرر|منهج)/i,
   // ── Compile/aggregate + implies structured output ──
-  /اجمع\s*(ال)?(قوانين|محاضرات|دروس|ملازم|مقرر|منهج|أحكام|مواد)/i,
-  /جم[عى]?\s*(كل)?\s*(ال)?(قوانين|محاضرات|دروس|ملازم|أحكام|مواد)/i,
-  /تجميع[ةه]?\s*(لل)?(قوانين|محاضرات|دروس|ملازم|أحكام|مواد)/i,
-  /لم[يى]?\s*(ال)?(قوانين|محاضرات|دروس|ملازم|أحكام|مواد)/i,
+  /اجمع\s*(ال)?(قوانين|محاضر[هت]?|دروس|ملازم|مقرر|منهج|أحكام|مواد)/i,
+  /جم[عى]?\s*(كل)?\s*(ال)?(قوانين|محاضر[هت]?|دروس|ملازم|أحكام|مواد)/i,
+  /تجميع[ةه]?\s*(لل)?(قوانين|محاضر[هت]?|دروس|ملازم|أحكام|مواد)/i,
+  /لم[يى]?\s*(ال)?(قوانين|محاضر[هت]?|دروس|ملازم|أحكام|مواد)/i,
   // ── Law/legal compilation (very common use case) ──
   /تجميع[ةه]?\s*(ال)?قوانين/i,
   /ملخص\s*(ال)?قوانين/i,
@@ -756,11 +760,11 @@ function extractCompileTopic(message: string): string | null {
     // "تجميعة بكل القوانين" → "قوانين"
     { pattern: /تجميع[ةه]?\s*بكل\s*(ال)?(.+?)(?:\s+من|\s+في|\s+على|\s*$)/i, groupIndex: 2 },
     // "تجميعة (لل)قوانين" → "قوانين"
-    { pattern: /تجميع[ةه]?\s*(لل)?(قوانين|أحكام|مواد|قانون|محاضرات|دروس|ملازم|مقرر|منهج)(?:\s|$)/i, groupIndex: 2 },
+    { pattern: /تجميع[ةه]?\s*(لل)?(قوانين|أحكام|مواد|قانون|محاضر[هت]?|دروس|ملازم|مقرر|منهج)(?:\s|$)/i, groupIndex: 2 },
     // "اجمع (ال)قوانين" → "قوانين"
-    { pattern: /اجمع\s*(ال)?(قوانين|أحكام|مواد|قانون|محاضرات|دروس|ملازم|مقرر|منهج)(?:\s|$)/i, groupIndex: 2 },
+    { pattern: /اجمع\s*(ال)?(قوانين|أحكام|مواد|قانون|محاضر[هت]?|دروس|ملازم|مقرر|منهج)(?:\s|$)/i, groupIndex: 2 },
     // "كل القوانين" → "قوانين"
-    { pattern: /كل\s*(ال)?(قوانين|أحكام|مواد|قانون|محاضرات|دروس)(?:\s|$)/i, groupIndex: 2 },
+    { pattern: /كل\s*(ال)?(قوانين|أحكام|مواد|قانون|محاضر[هت]?|دروس)(?:\s|$)/i, groupIndex: 2 },
     // "القوانين كلها/كاملة" → "قوانين"
     { pattern: /(ال)?(قوانين|أحكام|مواد|قانون)\s*(كلها|جميعها|كاملة)/i, groupIndex: 2 },
   ];
@@ -997,7 +1001,22 @@ export function classifyDocIntent(
   message: string,
   hasAttachments: boolean
 ): DocIntent | null {
-  const trimmed = message.trim();
+  // V.37: Normalize Arabic text before matching.
+  // Arabic has multiple Unicode representations for the same visual character:
+  //   - ة (Ta Marbuta, U+0629) vs ه (Ha, U+0647) — "محاضرة" vs "محاضره"
+  //   - أإآ (Alef with Hamza) vs ا (plain Alef) — "الأول" vs "الاول"
+  //   - ى (Alef Maksura) vs ي (Ya) — "في" vs "فى"
+  // Many regex patterns in this file use one form but user input may use another.
+  // This normalization ensures patterns match regardless of which form the user typed.
+  const normalizedMessage = message
+    .replace(/[\u064B-\u0652]/g, '')     // Remove tashkeel (diacritics)
+    .replace(/[إأآا]/g, 'ا')             // Normalize Alef variants → ا
+    .replace(/ى/g, 'ي')                   // Normalize Alef Maksura → Ya
+    .replace(/ة/g, 'ه')                   // Normalize Ta Marbuta → Ha (common in Egyptian Arabic)
+    .replace(/\s+/g, ' ')                 // Collapse multiple spaces
+    .trim();
+
+  const trimmed = normalizedMessage;
 
   // Skip empty or very short messages
   if (trimmed.length < 4) return null;
@@ -1007,7 +1026,7 @@ export function classifyDocIntent(
 
   // When no attachments, classify if the message explicitly mentions
   // file generation (e.g., "اعمل ملف PDF") OR implicitly implies it
-  // (e.g., "لخص القوانين", "اجمع المحاضرات" — structured output → file)
+  // (e.g., "لخص القوانين", "اجمع المحاضر[هت]?" — structured output → file)
   if (!hasAttachments && !isExplicitFileGen(trimmed) && !isImplicitFileGen(trimmed)) {
     return null;
   }
