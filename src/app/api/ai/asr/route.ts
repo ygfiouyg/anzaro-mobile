@@ -181,7 +181,36 @@ export async function POST(request: NextRequest) {
       console.warn('[ASR] whisper-large-v3 failed:', err instanceof Error ? err.message : String(err));
     }
 
-    // Both models failed
+    // ── LAST RESORT: ZAI SDK (only if HF credits are depleted) ──
+    // V.43b: HF Inference credits depleted (402 error). ZAI SDK is the
+    // only free option remaining. User requested ONLY distil-whisper +
+    // whisper-large-v3, but those require paid HF credits now.
+    // ZAI SDK uses ZAI_API_KEY (ZhipuAI/GLM) — free, decent quality.
+    try {
+      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+      const zai = await ZAI.create();
+      const zaiArrayBuffer = await audioFile.arrayBuffer();
+      const buffer = Buffer.from(zaiArrayBuffer);
+      const base64Audio = buffer.toString('base64');
+      const mimeType = audioFile.type || 'audio/wav';
+      const dataUrl = `data:${mimeType};base64,${base64Audio}`;
+
+      const result = await zai.audio.asr.create({ file: dataUrl, language });
+      let text = '';
+      if (typeof result === 'string') text = result;
+      else if (result?.text) text = result.text;
+      else if (result?.data?.text) text = result.data.text;
+      else if (Array.isArray(result)) text = result.map((item: any) => item.text || '').join(' ');
+
+      if (text && text.trim()) {
+        traceAPI(`ASR: ZAI SDK نجح (${text.length} حرف)`);
+        return NextResponse.json({ text: text.trim(), language, provider: 'zai' });
+      }
+    } catch (zaiErr) {
+      console.warn('[ASR] ZAI SDK failed:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
+    }
+
+    // All providers failed
     return NextResponse.json(
       { error: 'فشل في تحويل الصوت إلى نص — حاول تاني' },
       { status: 503 }

@@ -225,6 +225,30 @@ async function transcribeSegment(
     language,
     180_000 // 3 min — quality over speed
   );
+  if (text && text.trim()) {
+    return { text, provider: 'hf' };
+  }
+
+  // ── LAST RESORT: ZAI SDK (only if HF credits are depleted) ──
+  // V.43b: HF credits depleted (402). ZAI SDK is the only free option.
+  try {
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    const zai = await ZAI.create();
+    const base64Audio = audioBuffer.toString('base64');
+    const dataUrl = `data:audio/wav;base64,${base64Audio}`;
+    const result = await zai.audio.asr.create({ file: dataUrl, language });
+    let zaiText = '';
+    if (typeof result === 'string') zaiText = result;
+    else if (result?.text) zaiText = result.text;
+    else if (result?.data?.text) zaiText = result.data.text;
+    if (zaiText && zaiText.trim()) {
+      console.error('[Transcribe] ZAI SDK success: "' + zaiText.slice(0, 80) + '"');
+      return { text: zaiText, provider: 'hf' }; // keep 'hf' for compatibility
+    }
+  } catch (zaiErr) {
+    console.error('[Transcribe] ZAI SDK failed:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
+  }
+
   return { text, provider: 'hf' };
 }
 
