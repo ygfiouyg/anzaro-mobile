@@ -44,7 +44,7 @@ import { parseFileAttachments, type ParsedAttachment } from '@/lib/chat/attachme
 import { detectInlineMediaGenIntent } from '@/lib/chat/media-intent';
 import { containsHtmlTags, stripHtmlToMarkdown, stripHtmlChunk, markdownToSimpleHTML } from '@/lib/chat/html-sanitizer';
 import { FALLBACK_RESPONSE, buildSystemPrompt } from '@/lib/chat/system-prompt-builder';
-import { classifyDocIntent, hasDocIntent, type DocIntent, type DocIntentType } from '@/lib/chat/doc-intent-classifier';
+import { classifyDocIntent, classifyDocIntentWithAI, hasDocIntent, type DocIntent, type DocIntentType } from '@/lib/chat/doc-intent-classifier';
 import { processSmartDocV2, type SmartDocV2Input } from '@/lib/chat/smart-doc-v2';
 
 /**
@@ -631,7 +631,16 @@ export async function POST(request: NextRequest) {
     // the structured output naturally maps to a file/document.
     // The classifyDocIntent function internally checks both explicit and
     // implicit file generation patterns.
-    const docIntent = classifyDocIntent(message, parsed.hasAttachments || isFileGenerationIntent(message));
+    // V.46: Try regex classification first, then AI classification as fallback
+    let docIntent = classifyDocIntent(message, parsed.hasAttachments || isFileGenerationIntent(message));
+    // If regex didn't find intent but user has attachments or mentions files, try AI
+    if (!docIntent && (parsed.hasAttachments || isFileGenerationIntent(message))) {
+      console.log('[Chat] Regex intent null — trying AI classification...');
+      docIntent = await classifyDocIntentWithAI(message, parsed.hasAttachments);
+      if (docIntent) {
+        console.log(`[Chat] AI classified intent: ${docIntent.type}`);
+      }
+    }
     const hasEnhancedDocIntent = docIntent !== null && docIntent.type !== 'chat-only' && docIntent.type !== 'quiz';
 
     // ── Build system prompt using extracted module ──

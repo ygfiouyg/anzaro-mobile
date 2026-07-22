@@ -1229,3 +1229,80 @@ export function isDocQuizIntent(message: string, hasAttachments: boolean): boole
   const result = classifyDocIntent(message, hasAttachments);
   return result?.type === 'quiz';
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V.46: AI-Based Intent Classification (replaces regex for complex cases)
+// ═══════════════════════════════════════════════════════════════════════════
+// User requested: "مش حابب regex دا وعاوز كسف النيه وان الذكاء الاصطناعي يفهم المطلوب"
+// This function uses the ZAI LLM to classify intent when regex is uncertain.
+// It's called as a fallback AFTER the regex classifier returns null or 'chat-only'.
+
+export async function classifyDocIntentWithAI(
+  message: string,
+  hasAttachments: boolean
+): Promise<DocIntent | null> {
+  // Only use AI classification for messages with attachments or explicit file requests
+  if (!hasAttachments && !/(?:ملف|pdf|مستند|وثيقة|file|document|pdf)/i.test(message)) {
+    return null;
+  }
+
+  try {
+    const { getZAIClient } = await import('@/lib/chat-utils');
+    const zai = await getZAIClient();
+
+    const prompt = `أنت مساعد يصنف نية المستخدم. صنف الرسالة التالية إلى واحدة من هذه الفئات:
+- summarize: تلخيص المحتوى
+- compile: تجميع محاضرات متعددة في ملف واحد
+- extract-topic: استخراج موضوع معين من الملفات
+- outline: إنشاء فهرس أو خطة
+- compare: مقارنة بين ملفات
+- flashcards: كروت مراجعة
+- quiz: أسئلة اختبار
+- smart-doc: طلب مستند عام
+- chat-only: محادثة عادية بدون طلب مستند
+
+الرسالة: "${message.slice(0, 500)}"
+${hasAttachments ? 'يوجد ملفات مرفقة' : 'لا توجد مرفقات'}
+
+أجب بالفئة فقط (كلمة واحدة):`;
+
+    const result = await zai.chat.completions.create({
+      model: 'glm-4-flash',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.0,
+      max_tokens: 20,
+    });
+
+    const aiResponse = (result.choices?.[0]?.message?.content || '').trim().toLowerCase();
+
+    // Map AI response to DocIntent
+    const intentMap: Record<string, DocIntentType> = {
+      'summarize': 'summarize',
+      'compile': 'compile',
+      'extract-topic': 'extract-topic',
+      'extract_topic': 'extract-topic',
+      'outline': 'outline',
+      'compare': 'compare',
+      'flashcards': 'flashcards',
+      'quiz': 'quiz',
+      'smart-doc': 'smart-doc',
+      'smart_doc': 'smart-doc',
+      'chat-only': 'chat-only',
+      'chat_only': 'chat-only',
+    };
+
+    const intentType = intentMap[aiResponse] || null;
+    if (!intentType || intentType === 'chat-only') return null;
+
+    return {
+      type: intentType,
+      confidence: 0.8,
+      scope: 'all',
+      depth: 'medium',
+      rawTopic: message.slice(0, 100),
+    };
+  } catch (err) {
+    console.warn('[DocIntent-AI] Classification failed:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
