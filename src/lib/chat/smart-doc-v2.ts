@@ -337,55 +337,64 @@ async function routeSummarize(
   language: 'ar' | 'en',
   onProgress?: ProgressCallback,
 ): Promise<string> {
-  const depth = intent.depth || 'detailed'; // V.52: default to detailed for deep analysis
+  const depth = intent.depth || 'detailed';
   onProgress?.('processing', 25, language === 'ar' ? '🧠 جاري التحليل العميق للمحتوى...' : 'Deep analysis...', `depth: ${depth}`);
 
   const result = await summarizeFiles(files, depth, language);
 
-  // V.52: Rich markdown output that reflects the AI's deep thinking
-  let markdown = language === 'en'
-    ? `# 📚 Deep Analysis Report\n\n`
-    : `# 📚 تقرير التحليل العميق\n\n`;
+  // V.54: DeltaAI Document Template — branded header + executive summary + structured analysis
+  let markdown = '';
 
-  // Per-file sections — structured as a full analysis
+  // Clean branded header
+  const cleanTopic = sanitizeTitle(intent.topic || intent.rawTopic || '');
+  markdown += `# ${language === 'en' ? 'Deep Analysis Report' : 'تقرير التحليل العميق'}${cleanTopic ? ' — ' + cleanTopic : ''}\n\n`;
+
+  // Executive summary card — always first
+  if (result.crossSummary) {
+    markdown += language === 'en'
+      ? `:::callout-hook\n**📌 Executive Overview**\n\n${result.crossSummary}\n:::\n\n`
+      : `:::callout-hook\n**📌 الملخص التنفيذي**\n\n${result.crossSummary}\n:::\n\n`;
+  }
+
+  // Per-file sections — structured as deep analytical dive
   for (const fileSummary of result.perFile) {
     const cleanName = sanitizeFileName(fileSummary.fileName);
-    markdown += language === 'en'
-      ? `## 📄 ${cleanName}\n\n`
-      : `## 📄 ${cleanName}\n\n`;
-
-    markdown += language === 'en'
-      ? `### 📝 Analysis\n\n`
-      : `### 📝 التحليل\n\n`;
+    markdown += `## 📄 ${cleanName}\n\n`;
     markdown += `${fileSummary.summary}\n\n`;
 
     if (fileSummary.keyPoints.length > 0) {
       markdown += language === 'en'
         ? `### 🔑 Key Insights\n\n`
         : `### 🔑 النقاط الجوهرية\n\n`;
+
       for (let i = 0; i < fileSummary.keyPoints.length; i++) {
-        markdown += `**${i + 1}.** ${fileSummary.keyPoints[i]}\n\n`;
+        const point = fileSummary.keyPoints[i];
+        // V.54: Auto-detect callout type from emoji prefix
+        if (point.startsWith('📌')) {
+          markdown += `:::callout-hook\n${point}\n:::\n\n`;
+        } else if (point.startsWith('💡')) {
+          markdown += `:::callout-rule\n${point}\n:::\n\n`;
+        } else if (point.startsWith('⚠️')) {
+          markdown += `:::callout-error\n${point}\n:::\n\n`;
+        } else if (point.startsWith('🔗') || point.startsWith('⚖️')) {
+          // Comparisons → table format
+          markdown += `**${i + 1}.** ${point}\n\n`;
+        } else {
+          markdown += `**${i + 1}.** ${point}\n\n`;
+        }
       }
     }
-
     markdown += `---\n\n`;
   }
 
-  // Cross-file summary — the big picture
-  if (result.crossSummary) {
-    markdown += language === 'en'
-      ? `## 🎯 Big Picture\n\n`
-      : `## 🎯 الصورة الكاملة\n\n`;
-    markdown += `${result.crossSummary}\n\n`;
-  }
-
-  // Common themes — connections between concepts
+  // Common themes — connecting concepts
   if (result.commonThemes.length > 0) {
     markdown += language === 'en'
       ? `## 🔗 Connecting Themes\n\n`
       : `## 🔗 المواضيع المترابطة\n\n`;
     for (const theme of result.commonThemes) {
-      markdown += `- ${theme}\n`;
+      const cleanTheme = sanitizeTitle(theme);
+      markdown += `- ${cleanTheme}\n`;
     }
     markdown += '\n';
   }
