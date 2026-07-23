@@ -166,7 +166,8 @@ async function callLLM(
   model: string = 'glm-4-flash'
 ): Promise<string> {
   try {
-    const result = await Promise.race([
+    const result = await callLLMStreamed(systemPrompt, userMessage, model); // V.55: timeout removed
+    const _unused = [
       callLLMStreamed(systemPrompt, userMessage, model),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
     ]);
