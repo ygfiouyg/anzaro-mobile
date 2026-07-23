@@ -442,8 +442,8 @@ async function routeCompile(
 
   // Sections
   for (const section of result.sections) {
-    markdown += `### ${section.title}\n\n`;
-    markdown += `> ${language === 'en' ? 'Source' : 'المصدر'}: ${section.sourceFile}\n\n`;
+    markdown += `### ${sanitizeTitle(section.title)}\n\n`;
+    markdown += `> ${language === 'en' ? 'Source' : 'المصدر'}: ${sanitizeFileName(section.sourceFile)}\n\n`;
     markdown += `${section.content}\n\n`;
   }
 

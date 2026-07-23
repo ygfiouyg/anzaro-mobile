@@ -361,7 +361,7 @@ export async function extractTopicFromFiles(
   // ── Parallel extraction from all files (up to 3 concurrent) ──
   const perFileResults = await parallelWithLimit(files, MAX_CONCURRENT, async (file) => {
     if (!file.content || file.content.trim().length === 0) {
-      return { fileName: file.name, matches: [] as TopicMatchRaw[] };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, matches: [] as TopicMatchRaw[] };
     }
 
     const userMessage = isAr
@@ -371,7 +371,7 @@ export async function extractTopicFromFiles(
     try {
       const rawResponse = await callLLM(systemPrompt, userMessage, EXTRACTION_TIMEOUT_MS);
       if (!rawResponse) {
-        return { fileName: file.name, matches: [] as TopicMatchRaw[] };
+        return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, matches: [] as TopicMatchRaw[] };
       }
 
       const parsed = parseJSONResponse<PerFileTopicResult>(rawResponse, { matches: [] });
@@ -384,10 +384,10 @@ export async function extractTopicFromFiles(
         pageNumber: m.pageNumber,
       })).filter((m) => m.content.length > 0);
 
-      return { fileName: file.name, matches };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, matches };
     } catch (error) {
       console.error(`[MultiFileExtractor] Topic extraction failed for "${file.name}":`, error);
-      return { fileName: file.name, matches: [] as TopicMatchRaw[] };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, matches: [] as TopicMatchRaw[] };
     }
   });
 
@@ -628,7 +628,7 @@ export async function summarizeFiles(
 
     if (!file.content || file.content.trim().length === 0) {
       return {
-        fileName: file.name,
+        fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name,
         summary: isAr ? 'الملف فارغ أو لا يحتوي على محتوى قابل للقراءة.' : 'The file is empty or contains no readable content.',
         keyPoints: [],
         wordCount: 0,
@@ -643,7 +643,7 @@ export async function summarizeFiles(
       const rawResponse = await callLLM(systemPrompt, userMessage, SUMMARY_TIMEOUT_MS);
       if (!rawResponse) {
         return {
-          fileName: file.name,
+          fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name,
           summary: defaultResult.summary,
           keyPoints: [],
           wordCount: wordCount(file.content),
@@ -653,7 +653,7 @@ export async function summarizeFiles(
       const parsed = parseJSONResponse<PerFileSummaryRaw>(rawResponse, defaultResult);
 
       return {
-        fileName: file.name,
+        fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name,
         summary: parsed.summary || defaultResult.summary,
         keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints.filter(Boolean) : [],
         wordCount: wordCount(file.content),
@@ -661,7 +661,7 @@ export async function summarizeFiles(
     } catch (error) {
       console.error(`[MultiFileExtractor] Summarization failed for "${file.name}":`, error);
       return {
-        fileName: file.name,
+        fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name,
         summary: defaultResult.summary,
         keyPoints: [],
         wordCount: wordCount(file.content),
@@ -1005,7 +1005,7 @@ export async function compileFilesChunked(
     };
 
     if (!file.content || file.content.trim().length === 0) {
-      return { fileName: file.name, sections: [] as CompileSectionRaw[] };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, sections: [] as CompileSectionRaw[] };
     }
 
     // Choose prompt based on whether a topic is specified
@@ -1023,21 +1023,21 @@ export async function compileFilesChunked(
 
       if (!rawResponse || rawResponse.trim().length < 20) {
         console.warn(`[ChunkedCompile] Empty LLM response for "${file.name}", using raw content`);
-        return { fileName: file.name, sections: fileDefaultResult.sections };
+        return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, sections: fileDefaultResult.sections };
       }
 
       const parsed = parseJSONResponse<CompileResultRaw>(rawResponse, fileDefaultResult);
 
       if (!parsed.sections || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
         console.warn(`[ChunkedCompile] No sections parsed for "${file.name}", using raw content`);
-        return { fileName: file.name, sections: fileDefaultResult.sections };
+        return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, sections: fileDefaultResult.sections };
       }
 
       console.log(`[ChunkedCompile] Extracted ${parsed.sections.length} sections from "${file.name}" (${parsed.sections.reduce((sum, s) => sum + s.content.length, 0)} chars total)`);
-      return { fileName: file.name, sections: parsed.sections };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, sections: parsed.sections };
     } catch (error) {
       console.error(`[ChunkedCompile] Per-file extraction failed for "${file.name}":`, error instanceof Error ? error.message : String(error));
-      return { fileName: file.name, sections: fileDefaultResult.sections };
+      return { fileName: file.name.replace(/\.(pdf|docx?|txt)$/i, "").replace(/\s*\(\d+\)\s*/g, " ").trim() || file.name, sections: fileDefaultResult.sections };
     }
   });
 
